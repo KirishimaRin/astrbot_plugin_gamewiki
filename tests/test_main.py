@@ -737,3 +737,43 @@ def test_failed_image_send_is_not_marked_as_sent(plugin):
     with patch.object(module, "prepared_image", failing_image):
         asyncio.run(instance._send_entry_image(event, "https://example.org/a.png"))
     assert not instance._recent_images
+
+
+def test_evidence_card_is_rendered_locally_and_sent(plugin):
+    instance, Event, module = plugin
+    event = Event("")
+    event.image_result = lambda path: ("image", path)
+
+    def fake_render(title, source, sections):
+        assert title == "汤汤" and source == "终末地 AKEData"
+        assert sections == [("战技", "伤害 320%")]
+        return b"\x89PNG-fake"
+
+    with patch.object(module, "render_card", fake_render):
+        asyncio.run(
+            instance._send_card(
+                event,
+                {
+                    "title": "汤汤",
+                    "source": "终末地 AKEData",
+                    "sections": [("战技", "伤害 320%")],
+                },
+            )
+        )
+    assert event.sent == [("image", str(event.sent[0][1]))]
+
+
+def test_evidence_card_without_font_or_on_error_sends_nothing(plugin):
+    instance, Event, module = plugin
+    event = Event("")
+    with patch.object(module, "render_card", lambda *a: None):
+        asyncio.run(
+            instance._send_card(event, {"title": "t", "source": "s", "sections": []})
+        )
+    with patch.object(
+        module, "render_card", lambda *a: (_ for _ in ()).throw(RuntimeError("x"))
+    ):
+        asyncio.run(
+            instance._send_card(event, {"title": "t", "source": "s", "sections": []})
+        )
+    assert event.sent == []

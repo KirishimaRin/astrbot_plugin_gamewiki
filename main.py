@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import tempfile
 import time
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
 from .wiki.cache import Cache
 from .wiki.assistant import CommandAssistant
+from .wiki.card import render_card
 from .wiki.client import WikiClient
 from .wiki.conversation import NUMBER, Conversations, is_followup, looks_like_followup
 from .wiki.games import PROFILES, GameProfile, parse_alias_config
@@ -486,6 +488,25 @@ class GameWiki(Star):
         image_url = metrics.get("image_url") if isinstance(metrics, dict) else ""
         if self.image_reply and image_url:
             await self._send_entry_image(event, image_url)
+        card = metrics.get("card") if isinstance(metrics, dict) else None
+        if self.image_reply and card:
+            await self._send_card(event, card)
+
+    async def _send_card(self, event: AstrMessageEvent, card: dict):
+        # Rendered locally from validated evidence; no font means no card.
+        try:
+            async with self._image_slots:
+                png = await asyncio.to_thread(
+                    render_card, card["title"], card["source"], card["sections"]
+                )
+                if not png:
+                    return
+                with tempfile.TemporaryDirectory(prefix="gamewiki-card-") as directory:
+                    path = Path(directory) / "card.png"
+                    path.write_bytes(png)
+                    await event.send(event.image_result(str(path)))
+        except Exception:
+            logger.debug("证据卡片发送失败，忽略", exc_info=True)
 
     async def _send_entry_image(self, event: AstrMessageEvent, image_url: str):
         key = (event.unified_msg_origin, image_url)
