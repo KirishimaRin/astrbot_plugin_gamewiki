@@ -19,9 +19,7 @@ QUESTION = re.compile(
     + "|".join(re.escape(word) for word in aspect_words())
 )
 # Queries about the entry itself; portraits illustrate identity, not aspects.
-IDENTITY = re.compile(
-    r"是谁|简介|介绍|立绘|头像|外观|形象|样貌|长相|长什么样|什么样子"
-)
+IDENTITY = re.compile(r"是谁|简介|介绍|立绘|头像|外观|形象|样貌|长相|长什么样|什么样子")
 PREFIX = re.compile(
     r"^(?:请问|请|帮我|帮忙|给我|查一下|查查|查询|讲讲|说说|介绍一下|我想知道|我想了解|关于)[，,：:\s]*"
 )

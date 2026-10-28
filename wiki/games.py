@@ -113,8 +113,21 @@ ZMD = GameProfile(
 # word teaches intent parsing for all games at once and cannot drift from
 # section selection.
 GENERIC_ASPECTS = (
-    "材料", "故事", "剧情", "用途", "简介", "描述", "效果", "总量", "出处",
-    "流程", "武器", "图鉴", "立绘", "头像", "配队",
+    "材料",
+    "故事",
+    "剧情",
+    "用途",
+    "简介",
+    "描述",
+    "效果",
+    "总量",
+    "出处",
+    "流程",
+    "武器",
+    "图鉴",
+    "立绘",
+    "头像",
+    "配队",
 )
 
 PROFILES = {p.code: p for p in (YS, SR, ZZZ, ARKNIGHTS, ZMD)}
