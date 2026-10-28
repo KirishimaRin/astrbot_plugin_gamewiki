@@ -10,12 +10,17 @@ import re
 import time
 
 from .formatter import format_command, source_links
+from .games import aspect_words
 from .models import WikiError
 
 QUESTION = re.compile(
     r"什么|怎么|如何|哪些|多少|哪里|在哪|为何|为什么|需要|讲了|讲讲|说说|告诉|介绍|"
-    r"突破|晋阶|精英化|材料|获取|技能|倍率|故事|剧情|属性|用途|简介|"
-    r"描述|面板|效果|总量|出处|流程|天赋|是谁|能否|能不能|有没有|[吗呢么？?]$"
+    r"是谁|能否|能不能|有没有|[吗呢么？?]$|"
+    + "|".join(re.escape(word) for word in aspect_words())
+)
+# Queries about the entry itself; portraits illustrate identity, not aspects.
+IDENTITY = re.compile(
+    r"是谁|简介|介绍|立绘|头像|外观|形象|样貌|长相|长什么样|什么样子"
 )
 PREFIX = re.compile(
     r"^(?:请问|请|帮我|帮忙|给我|查一下|查查|查询|讲讲|说说|介绍一下|我想知道|我想了解|关于)[，,：:\s]*"
@@ -37,6 +42,14 @@ def literal_intent(text: str, service) -> tuple[str, str] | None:
     if not QUESTION.search(text) and not PREFIX.match(text):
         return text, ""
     return None
+
+
+def wants_image(question: str, title: str) -> bool:
+    """Only identity-oriented queries warrant the entry's own picture."""
+    stripped = (question or "").strip()
+    if not stripped or stripped == (title or "").strip():
+        return True
+    return bool(IDENTITY.search(stripped))
 
 
 def fallback_intent(text: str) -> tuple[str, str]:
@@ -206,7 +219,10 @@ class CommandAssistant:
         metrics["outcome"] = result["status"]
         metrics["source_key"] = result.get("source_key", "")
         if result.get("status") == "ok":
-            metrics["image_url"] = result.get("image_url", "")
+            if wants_image(question, result.get("title", "")):
+                metrics["image_url"] = result.get("image_url", "")
+            else:
+                metrics["image_decision"] = "aspect_query"
         if result["status"] in {"error", "not_found", "needs_choice"}:
             reply = format_command(result)
         elif not result.get("evidence"):

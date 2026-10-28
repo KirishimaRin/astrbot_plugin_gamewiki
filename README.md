@@ -4,7 +4,7 @@
 
 查询原神、崩坏星穹铁道、绝区零、明日方舟与明日方舟终末地的角色、技能、材料、书籍和任务资料，向聊天模型返回相关正文与来源链接。明日方舟优先使用 PRTS，异常或无结果时回退 BWIKI；终末地优先 AKEData、BWIKI 兜底；原神、星铁和绝区零使用 BWIKI。
 
-当前版本：**v0.2.0**；作者：**KirishimaRin**。初始版本为 v0.2.0。插件标识：`astrbot_plugin_gamewiki`。持续改进计划见 [ROADMAP](docs/ROADMAP.md)。
+当前版本：**v0.2.1**；作者：**KirishimaRin**。初始版本为 v0.2.0。插件标识：`astrbot_plugin_gamewiki`。持续改进计划见 [ROADMAP](docs/ROADMAP.md)。
 
 GitHub 仓库、插件标识与 ZIP 包名统一为 `astrbot_plugin_gamewiki`。
 
@@ -17,7 +17,7 @@ GitHub 仓库、插件标识与 ZIP 包名统一为 `astrbot_plugin_gamewiki`。
 - 内容提取：保留折叠故事、材料数量与表格列名，支持指定技能等级。
 - 措辞兜底：问题用词与正文无重叠时回退最相关分节，并标注命中模式。
 - 纠错与跨游戏提示：无结果时给出“您是不是要找”建议；用原神昵称查其他游戏时提示对应 `/ys` 条目。
-- 图片回复：优先选择与条目名匹配的角色立绘，过滤星级条、头像和界面图标，可配置关闭。
+- 图片回复：优先选择与条目名匹配的角色立绘，过滤星级条、头像和界面图标；仅在名称或身份类查询（是谁、简介、立绘等）附带，技能、材料等具体问题与分节追问不重复发图，同一会话窗口内同一张图片只发送一次，可配置关闭。
 - 调用限制：单用户冷却与配额、全局每分钟上限，管理员豁免，防刷屏护站点。
 - 管理命令：查看运行统计、一键清空缓存。
 - 连续查询：候选编号选择、已确认条目的分节追问，按会话和用户隔离并自动过期。
@@ -52,7 +52,7 @@ https://github.com/KirishimaRin/astrbot_plugin_gamewiki
 
 安装后启用插件，确认依赖安装完成且没有加载错误。
 
-也可上传从源码构建的 `astrbot_plugin_gamewiki-v0.2.0.zip`。构建方法见 [开发说明](docs/DEVELOPMENT.md)。
+也可上传从源码构建的 `astrbot_plugin_gamewiki-v0.2.1.zip`。构建方法见 [开发说明](docs/DEVELOPMENT.md)。
 
 源码调试时将仓库放入 AstrBot 的 `data/plugins/astrbot_plugin_gamewiki/`，在 WebUI 重载插件。Docker 环境的实际路径取决于数据卷映射。
 

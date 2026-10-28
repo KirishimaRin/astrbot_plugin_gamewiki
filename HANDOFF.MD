@@ -28,6 +28,8 @@
 - AKEData 立绘最多下载24 MiB，最长边缩至1200像素并转 JPEG，压缩结果缓存6小时。图片最多同时处理两张；文字先发，临时图片必须保留到 event.send 完成后再删除。
 - 不删除所有隐藏节点；折叠故事可能位于 display:none。表格要保留空列、rowspan/colspan、材料名与数量、技能等级与单位。
 - PRTS 页面含数据脚本，使用 `wiki/prts.py` 提取已知字段，不执行页面 JavaScript。
+- 立绘只在名称或身份类查询（是谁、简介、立绘等）时附带；方面问题、候选选择和分节补读由 `assistant.wants_image` 统一跳过，命令与 AI 工具路径一致。问题拆分的方面词汇以 `games.aspect_words()` 为单一来源，新增方面词加在 `GENERIC_ASPECTS` 或对应游戏 intents/specifics，不要改 assistant 的问题正则。
+- 同一会话窗口内同一图片 URL 只发送一次（600 秒，与追问话题 TTL 对齐，进程内存记录，重启清零）；发送失败不记入去重，下次查询可重试。
 
 ## 框架与依赖
 

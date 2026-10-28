@@ -283,3 +283,54 @@ def test_source_fallback_notice_uses_the_actual_game_and_origin(
             assert "已改用明日方舟 BWIKI" not in reply
 
     asyncio.run(run())
+
+
+class TestImageGating(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def image_page(**overrides):
+        result = page()
+        result["image_url"] = "https://example.org/p.png"
+        result.update(overrides)
+        return result
+
+    async def test_name_and_identity_queries_attach_the_portrait(self):
+        for text in ("纳西妲", "纳西妲 简介", "纳西妲是谁"):
+            service = Service(self.image_page())
+            _, metrics = await CommandAssistant(AsyncMock()).answer(
+                text, PROFILES["ys"], service
+            )
+            assert metrics["image_url"] == "https://example.org/p.png", text
+
+    async def test_aspect_questions_skip_the_portrait(self):
+        for text in ("纳西妲 突破材料", "纳西妲武器图鉴"):
+            _, metrics = await CommandAssistant(AsyncMock()).answer(
+                text, PROFILES["ys"], Service(self.image_page())
+            )
+            assert "image_url" not in metrics, text
+            assert metrics["image_decision"] == "aspect_query", text
+
+    async def test_followup_and_selection_reads_keep_the_original_decision(self):
+        for question, expected in (("突破材料呢", False), ("", True)):
+            service = Service()
+            service.read = AsyncMock(return_value=self.image_page())
+            _, metrics = await CommandAssistant(AsyncMock()).answer(
+                question or "纳西妲",
+                PROFILES["ys"],
+                service,
+                page_id=42,
+                question=question,
+            )
+            assert ("image_url" in metrics) is expected, question
+
+    async def test_aspect_vocabulary_is_derived_from_game_profiles(self):
+        from wiki.assistant import IDENTITY, QUESTION
+        from wiki.games import aspect_words
+
+        words = aspect_words()
+        for word in ("武器", "图鉴", "立绘", "头像", "配队", "技能", "材料"):
+            assert word in words, word
+        assert QUESTION.search("汤汤武器")
+        assert QUESTION.search("汤汤配队")
+        assert IDENTITY.search("汤汤立绘")
+        # Bare names still parse as entities, not questions.
+        assert literal_intent("汤汤武器", Service()) is None

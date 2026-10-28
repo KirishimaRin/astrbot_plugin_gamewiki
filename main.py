@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 from pathlib import Path
 
 from astrbot.api import AstrBotConfig, logger
@@ -22,6 +23,9 @@ from .wiki.sources import ArknightsSources, EndfieldSources
 from .wiki.akedata import AkeClient, AkeService
 
 ADMIN_WORDS = {"stats", "clear-cache", "session", "doctor"}
+# Aligns with the conversation topic lifetime: followups inside one topic
+# never resend the same picture, a fresh topic later may.
+IMAGE_DEDUP_TTL = 600
 
 
 class GameWiki(Star):
@@ -72,6 +76,9 @@ class GameWiki(Star):
         self.services: dict[str, QueryService | ArknightsSources | EndfieldSources] = {}
         self.clients: list[WikiClient] = []
         self._image_slots = asyncio.Semaphore(2)
+        # Sent portraits within one chat, kept until the conversation topic
+        # would have expired; restarts reset it.
+        self._recent_images: dict[tuple[str, str], float] = {}
 
         def build_service(code, source):
             profile = PROFILES[code]
@@ -478,12 +485,29 @@ class GameWiki(Star):
         await event.send(event.plain_result(notice + text))
         image_url = metrics.get("image_url") if isinstance(metrics, dict) else ""
         if self.image_reply and image_url:
-            try:
-                async with self._image_slots:
-                    async with prepared_image(image_url, self.cache) as image:
-                        await event.send(event.image_result(image))
-            except Exception:
-                logger.debug("条目图片发送失败，忽略", exc_info=True)
+            await self._send_entry_image(event, image_url)
+
+    async def _send_entry_image(self, event: AstrMessageEvent, image_url: str):
+        key = (event.unified_msg_origin, image_url)
+        now = time.monotonic()
+        last = self._recent_images.get(key)
+        if last is not None and now - last < IMAGE_DEDUP_TTL:
+            return
+        try:
+            async with self._image_slots:
+                async with prepared_image(image_url, self.cache) as image:
+                    await event.send(event.image_result(image))
+        except Exception:
+            logger.debug("条目图片发送失败，忽略", exc_info=True)
+            return
+        self._recent_images[key] = now
+        if len(self._recent_images) > 256:
+            cutoff = now - IMAGE_DEDUP_TTL
+            for stale, sent in list(self._recent_images.items()):
+                if sent <= cutoff:
+                    del self._recent_images[stale]
+            while len(self._recent_images) > 256:
+                self._recent_images.pop(next(iter(self._recent_images)))
 
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def wiki_followup(self, event: AstrMessageEvent):

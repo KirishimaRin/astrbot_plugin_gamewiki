@@ -108,7 +108,26 @@ ZMD = GameProfile(
     ),
 )
 
+# Aspect words shared by every game. The question splitter in assistant.py
+# builds its vocabulary from here plus the per-game intents, so a new aspect
+# word teaches intent parsing for all games at once and cannot drift from
+# section selection.
+GENERIC_ASPECTS = (
+    "材料", "故事", "剧情", "用途", "简介", "描述", "效果", "总量", "出处",
+    "流程", "武器", "图鉴", "立绘", "头像", "配队",
+)
+
 PROFILES = {p.code: p for p in (YS, SR, ZZZ, ARKNIGHTS, ZMD)}
+
+
+def aspect_words() -> tuple:
+    """Every word that marks a query as an aspect question, not a bare name."""
+    words = set(GENERIC_ASPECTS)
+    for profile in PROFILES.values():
+        for row in (*profile.intents, *profile.specifics):
+            words.update(row[0])
+    # Longest first so multi-word terms win over their prefixes.
+    return tuple(sorted(words, key=len, reverse=True))
 
 
 def resolve(code: str) -> GameProfile:

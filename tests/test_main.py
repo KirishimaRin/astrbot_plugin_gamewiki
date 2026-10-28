@@ -701,3 +701,39 @@ def test_clear_cache_clears_shared_http_cache_once(plugin):
     assert "HTTP 条目 7 条" in replies[0] and "已解析页面 4 个" in replies[0]
     for service in instance.services.values():
         service.clear_parse_cache.assert_awaited_once()
+
+
+def test_entry_image_is_sent_once_per_topic_window(plugin):
+    import contextlib
+
+    instance, Event, module = plugin
+    downloads = []
+
+    @contextlib.asynccontextmanager
+    async def fake_image(url, cache=None):
+        downloads.append(url)
+        yield "/tmp/fake-portrait.jpg"
+
+    event = Event("")
+    event.image_result = lambda path: ("image", path)
+    with patch.object(module, "prepared_image", fake_image):
+        asyncio.run(instance._send_entry_image(event, "https://example.org/a.png"))
+        asyncio.run(instance._send_entry_image(event, "https://example.org/a.png"))
+        asyncio.run(instance._send_entry_image(event, "https://example.org/b.png"))
+    assert downloads == ["https://example.org/a.png", "https://example.org/b.png"]
+
+
+def test_failed_image_send_is_not_marked_as_sent(plugin):
+    import contextlib
+
+    instance, Event, module = plugin
+
+    @contextlib.asynccontextmanager
+    async def failing_image(url, cache=None):
+        raise RuntimeError("download failed")
+        yield ""
+
+    event = Event("")
+    with patch.object(module, "prepared_image", failing_image):
+        asyncio.run(instance._send_entry_image(event, "https://example.org/a.png"))
+    assert not instance._recent_images
