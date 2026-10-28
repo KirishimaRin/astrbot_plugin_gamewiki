@@ -1,0 +1,9 @@
+# CI installs with `pip install -c requirements-constraints.txt -r ...`
+# so every run exercises the dependency versions validated locally.
+httpx==0.28.1
+beautifulsoup4==4.15.0
+PyYAML==6.0.3
+pytest==9.1.1
+docstring-parser==0.18.0
+Pillow==12.3.0; python_version < "3.11"
+Pillow==13.0.0; python_version >= "3.11"

@@ -1,0 +1,703 @@
+"""Offline coverage for main.py using the same stub modules as the contract check."""
+
+import asyncio
+import importlib.util
+import json
+import sys
+import tempfile
+import types
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+from wiki.limits import Limiter
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _install_stubs(data_dir: str):
+    def install(name, **attrs):
+        module = types.ModuleType(name)
+        module.__dict__.update(attrs)
+        sys.modules[name] = module
+        return module
+
+    class Event:
+        def __init__(self, text="", *, admin=False, origin="test:GroupMessage:1"):
+            self.message_str = text
+            self._admin = admin
+            self.unified_msg_origin = origin
+            self.sent = []
+            self.stopped = False
+
+        def is_admin(self):
+            return self._admin
+
+        def get_sender_id(self):
+            return "tester"
+
+        def plain_result(self, text):
+            return text
+
+        async def send(self, result):
+            self.sent.append(result)
+
+        def stop_event(self):
+            self.stopped = True
+
+    def passthrough(*args, **kwargs):
+        def decorate(handler):
+            return handler
+
+        return decorate
+
+    install("astrbot")
+    install("astrbot.api", AstrBotConfig=dict, logger=__import__("logging"))
+    install(
+        "astrbot.api.event",
+        AstrMessageEvent=Event,
+        filter=SimpleNamespace(
+            command=passthrough,
+            event_message_type=passthrough,
+            EventMessageType=SimpleNamespace(ALL=1),
+            llm_tool=passthrough,
+            permission_type=passthrough,
+            PermissionType=SimpleNamespace(ADMIN=1),
+        ),
+    )
+    install(
+        "astrbot.api.star",
+        Star=type("Star", (), {"__init__": lambda s, c: None}),
+        Context=object,
+    )
+    install("astrbot.core")
+    install("astrbot.core.utils")
+    install(
+        "astrbot.core.utils.astrbot_path",
+        get_astrbot_data_path=lambda: str(data_dir),
+    )
+    package = install("qa_plugin")
+    package.__path__ = [str(ROOT)]
+    spec = importlib.util.spec_from_file_location("qa_plugin.main", ROOT / "main.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    # Each test replaces the root package, while imported submodules remain
+    # cached. Python 3.10 mock.patch traverses parent attributes, so restore the
+    # package links that a real import would establish on first load.
+    package.wiki = sys.modules["qa_plugin.wiki"]
+    package.main = module
+    return module, Event
+
+
+@pytest.fixture()
+def plugin():
+    with tempfile.TemporaryDirectory() as data_dir:
+        module, Event = _install_stubs(data_dir)
+        instance = module.GameWiki(
+            object(),
+            {"games": ["ys", "sr"], "user_cooldown_seconds": 0},
+        )
+        yield instance, Event, module
+        asyncio.run(instance.terminate())
+
+
+def test_number_clamps_out_of_range_and_bad_values(plugin):
+    instance, _, _ = plugin
+    assert 2 <= instance.brief_chars <= 1500
+    bad = type(instance)(
+        object(),
+        {"reply_brief_chars": "abc", "reply_question_chars": 99999},
+    )
+    assert bad.brief_chars == 350
+    assert bad.detailed_chars == 2000
+
+
+@pytest.mark.parametrize(
+    "config",
+    [{}, {"games": []}, {"games": ["nope", 1]}, {"games": None}, {"games": "ys"}],
+)
+def test_games_default_and_invalid_config_enable_all_games(plugin, config):
+    instance, _, module = plugin
+    assert set(instance.services) == {"ys", "sr"}
+    configured = type(instance)(object(), config)
+    try:
+        assert set(configured.services) == set(module.PROFILES)
+        schema = json.loads((ROOT / "_conf_schema.json").read_text(encoding="utf-8"))
+        assert schema["games"]["default"] == list(module.PROFILES)
+    finally:
+        asyncio.run(configured.terminate())
+
+
+def test_existing_games_subset_is_preserved_and_duplicates_are_ignored(plugin):
+    instance, _, _ = plugin
+    configured = type(instance)(object(), {"games": ["ys", "ys", "sr", "invalid"]})
+    try:
+        assert list(configured.services) == ["ys", "sr"]
+        assert len(configured.clients) == 2
+    finally:
+        asyncio.run(configured.terminate())
+
+
+def test_shared_cache_instance_across_clients(plugin):
+    instance, _, _ = plugin
+    assert instance.clients[0].cache is instance.clients[1].cache
+
+
+def test_session_overrides_take_precedence(plugin):
+    instance, Event, _ = plugin
+    event = Event("", origin="test:GroupMessage:9")
+    instance.session_overrides["test:GroupMessage:9"] = False
+    assert instance._allowed(event) is False
+    instance.session_overrides["test:GroupMessage:9"] = True
+    assert instance._allowed(event) is True
+    del instance.session_overrides["test:GroupMessage:9"]
+    assert instance._allowed(event) is True, "no whitelist configured"
+    instance.sessions = {"test:GroupMessage:1"}
+    assert instance._allowed(Event("", origin="test:GroupMessage:2")) is False
+
+
+def test_admin_bypasses_rate_limit(plugin):
+    from wiki.models import WikiError
+
+    instance, Event, _ = plugin
+    instance.limiter = Limiter(cooldown=0, per_user=1, per_minute=1)
+    for _ in range(5):
+        instance._limited(Event("", admin=True))
+    normal = Event("", admin=False)
+    instance._limited(normal)
+    with pytest.raises(WikiError):
+        instance._limited(Event("", admin=False))
+
+
+def test_tool_search_does_not_charge_disabled_games(plugin):
+    instance, Event, _ = plugin
+    calls = []
+
+    def fake_limited(event, cooldown=True):
+        calls.append(1)
+
+    instance._limited = fake_limited
+    result = asyncio.run(instance._tool_search(Event(), "x", "y", "zmd"))
+    assert result["code"] == "game_disabled"
+    assert not calls, "disabled games must not consume the rate budget"
+
+
+def test_tool_read_converts_integral_float_page_id(plugin):
+    instance, Event, _ = plugin
+    captured = {}
+
+    async def fake_read(page_id, question, section):
+        captured["page_id"] = page_id
+        return {"status": "ok"}
+
+    instance.services["ys"].read = fake_read
+    result = asyncio.run(instance._tool_read(Event(), 42.0, "", "问题", "ys"))
+    assert result["status"] == "ok"
+    assert captured["page_id"] == 42 and isinstance(captured["page_id"], int)
+
+
+def test_run_maps_errors_for_the_user(plugin):
+    instance, _, _ = plugin
+
+    async def boom():
+        raise ValueError("x")
+
+    result = asyncio.run(instance._run(boom))
+    assert result["status"] == "error" and result["code"] == "internal"
+
+    async def timeout():
+        raise asyncio.TimeoutError()
+
+    result = asyncio.run(instance._run(timeout))
+    assert result["code"] == "timeout"
+
+
+def test_stats_text_lists_games(plugin):
+    instance, _, _ = plugin
+    text = instance._stats_text()
+    assert "百科运行统计" in text and "[ys]" in text and "[sr]" in text
+
+
+def test_session_override_persists_to_data_dir(plugin):
+    instance, Event, _ = plugin
+
+    async def admin(arg):
+        event = Event(f"ys session {arg}", origin="test:GroupMessage:7", admin=True)
+        async for _ in instance._admin_action(event, "session"):
+            pass
+        return event
+
+    asyncio.run(admin("off"))
+    assert instance.session_overrides["test:GroupMessage:7"] is False
+    assert instance._allowed(Event("", origin="test:GroupMessage:7")) is False
+    asyncio.run(admin("on"))
+    assert instance.session_overrides["test:GroupMessage:7"] is True
+    assert instance._allowed(Event("", origin="test:GroupMessage:7")) is True
+    assert json.loads(
+        (instance.data_dir / "session-overrides.json").read_text(encoding="utf-8")
+    ) == {"test:GroupMessage:7": True}
+
+
+@pytest.mark.parametrize("game", ["ys", "sr", "zzz", "arknights", "zmd"])
+def test_public_commands_can_disable_inspect_and_restore_session(plugin, game):
+    instance, Event, module = plugin
+    profile = module.PROFILES[game]
+
+    async def check():
+        handler = getattr(instance, f"wiki_command_{game}")
+        instance._limited = lambda *args, **kwargs: pytest.fail("admin consumed quota")
+        for argument, expected in (("off", False), ("status", False), ("on", True)):
+            event = Event(f"{profile.command} session {argument}", admin=True)
+            assert [r async for r in handler(event)] == []
+            assert instance.session_overrides[event.unified_msg_origin] is expected
+            assert len(event.sent) == 1
+            assert ("开启" if expected else "关闭") in event.sent[0]
+            if not expected:
+                query = Event(f"{profile.command} 纳西妲")
+                assert "未启用" in [r async for r in handler(query)][0]
+
+        denied = Event(f"{profile.command} session off")
+        assert "管理员" in [r async for r in handler(denied)][0]
+        assert instance._allowed(denied)
+        invalid = Event(f"{profile.command} session invalid", admin=True)
+        assert [r async for r in handler(invalid)] == []
+        assert "用法" in invalid.sent[0]
+        status = Event(f"{profile.command} session", admin=True)
+        assert [r async for r in handler(status)] == []
+        assert "开启" in status.sent[0]
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("layout", ["fresh", "legacy", "new", "both"])
+def test_session_switch_survives_reload_for_all_directory_layouts(plugin, layout):
+    instance, Event, module = plugin
+    root = Path(module.get_astrbot_data_path()) / "plugin_data"
+    if layout in {"legacy", "both"}:
+        (root / "genshinimpactsearch").mkdir(parents=True)
+    if layout in {"new", "both"}:
+        (root / "gamewiki").mkdir(parents=True)
+
+    async def check():
+        first = type(instance)(object(), {})
+        second = None
+        try:
+            event = Event("ys session off", admin=True)
+            assert [r async for r in first.wiki_command_ys(event)] == []
+            selected = "genshinimpactsearch" if layout == "legacy" else "gamewiki"
+            assert first.data_dir == root / selected
+            assert (first.data_dir / "session-overrides.json").is_file()
+            second = type(instance)(object(), {})
+            assert not second._allowed(event)
+        finally:
+            await first.terminate()
+            if second:
+                await second.terminate()
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("raw", ["[]", "null", '"text"', "{invalid"])
+def test_invalid_session_file_does_not_break_startup(plugin, raw):
+    instance, _, _ = plugin
+    instance.data_dir.mkdir(parents=True)
+    (instance.data_dir / "session-overrides.json").write_text(raw, encoding="utf-8")
+    assert instance._load_session_overrides(instance.data_dir) == {}
+
+
+def test_session_file_accepts_only_boolean_values(plugin):
+    instance, _, _ = plugin
+    instance.data_dir.mkdir(parents=True)
+    (instance.data_dir / "session-overrides.json").write_text(
+        json.dumps({"off": False, "on": True, "string": "false", "number": 1}),
+        encoding="utf-8",
+    )
+    assert instance._load_session_overrides(instance.data_dir) == {
+        "off": False,
+        "on": True,
+    }
+
+
+def test_failed_session_save_keeps_previous_file_and_notifies_admin(plugin):
+    instance, Event, _ = plugin
+    assert instance._save_session_overrides(instance.data_dir)
+    original = (instance.data_dir / "session-overrides.json").read_bytes()
+
+    async def check():
+        event = Event("ys session off", admin=True)
+        with patch.object(Path, "replace", side_effect=OSError("read-only")):
+            assert [r async for r in instance.wiki_command_ys(event)] == []
+        assert "仅本次运行生效" in event.sent[0]
+        assert not instance._allowed(event)
+        assert (instance.data_dir / "session-overrides.json").read_bytes() == original
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("error", ["wiki", "timeout", "unexpected", "long_input"])
+def test_public_command_sends_error_reply_without_secondary_exception(plugin, error):
+    instance, Event, module = plugin
+    errors = {
+        "wiki": module.WikiError("upstream", "模拟上游错误"),
+        "timeout": asyncio.TimeoutError(),
+        "unexpected": RuntimeError("模拟异常"),
+    }
+    if error != "long_input":
+        instance.services["ys"].search = AsyncMock(side_effect=errors[error])
+    text = "名" * 301 if error == "long_input" else "纳西妲"
+    event = Event(f"ys {text}")
+    replies = asyncio.run(_collect(instance.wiki_command_ys(event)))
+    assert replies == []
+    expected = {
+        "wiki": "模拟上游错误",
+        "timeout": "查询超时",
+        "unexpected": "百科查询异常",
+        "long_input": "1–300",
+    }
+    assert len(event.sent) == 1 and expected[error] in event.sent[0]
+
+
+async def _collect(handler):
+    return [reply async for reply in handler]
+
+
+def _wiki_page(title="纳西妲", page_id=42):
+    return {
+        "status": "ok",
+        "title": title,
+        "page_id": page_id,
+        "url": f"https://wiki.biligame.com/ys/{title}",
+        "available_sections": ["突破", "元素战技"],
+        "evidence": [{"section": "突破", "text": "需要劫波莲。"}],
+    }
+
+
+@pytest.mark.parametrize("game", ["ys", "sr", "zzz", "arknights", "zmd"])
+def test_numbered_choices_and_plain_followups_use_selected_page_id(plugin, game):
+    instance, Event, module = plugin
+    search = AsyncMock(
+        return_value={
+            "status": "needs_choice",
+            "query": "测试",
+            "question": "突破材料",
+            "candidates": [
+                {"title": "目标角色", "page_id": 9, "url": "https://example.test/9"}
+            ],
+        }
+    )
+    read = AsyncMock(return_value=_wiki_page("目标角色", 9))
+    instance.services[game] = SimpleNamespace(search=search, read=read)
+    handler = getattr(instance, f"wiki_command_{game}")
+    command = module.PROFILES[game].command
+
+    async def check():
+        query = Event(f"{command} 测试 突破材料")
+        assert [r async for r in handler(query)] == []
+        assert "1. 目标角色" in query.sent[0] and "2分钟内回复编号" in query.sent[0]
+        choice = Event("1")
+        await instance.wiki_followup(choice)
+        assert choice.stopped and choice.message_str == "1"
+        read.assert_awaited_once_with(9, "突破材料")
+        assert "已选择【目标角色】" in choice.sent[0]
+        followup = Event("战技10级呢")
+        await instance.wiki_followup(followup)
+        assert followup.stopped
+        assert "继续查询【目标角色】" in followup.sent[0]
+        assert read.await_args.args == (9, "战技10级呢")
+        command_followup = Event(f"{command} 突破材料呢")
+        assert [r async for r in handler(command_followup)] == []
+        assert read.await_args.args == (9, "突破材料呢")
+        assert search.await_count == 1
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("source", ["prts", "bwiki"])
+def test_ark_candidates_and_followups_keep_their_source(plugin, source):
+    instance, Event, module = plugin
+    candidates = {
+        "status": "needs_choice",
+        "query": "测试",
+        "question": "技能",
+        "candidates": [
+            {"title": "能天使", "page_id": 7, "url": "https://example.test/7"}
+        ],
+    }
+    primary = SimpleNamespace(
+        aliases={},
+        search=AsyncMock(return_value=candidates),
+        read=AsyncMock(return_value=_wiki_page("能天使", 7)),
+    )
+    backup = SimpleNamespace(
+        aliases={},
+        search=AsyncMock(return_value=candidates),
+        read=AsyncMock(return_value=_wiki_page("能天使", 7)),
+    )
+    if source == "bwiki":
+        primary.search.return_value = {"status": "not_found"}
+    instance.services["arknights"] = module.ArknightsSources(primary, backup)
+
+    async def check():
+        initial = Event("ark 测试 技能")
+        await _collect(instance.wiki_command_arknights(initial))
+        if source == "bwiki":
+            assert "已改用明日方舟 BWIKI" in initial.sent[0]
+        chosen = Event("1")
+        await instance.wiki_followup(chosen)
+        followup = Event("技能3倍率")
+        await instance.wiki_followup(followup)
+        selected, other = (primary, backup) if source == "prts" else (backup, primary)
+        assert selected.read.await_count == 2
+        assert selected.read.await_args.args == (7, "技能3倍率", "")
+        other.read.assert_not_awaited()
+        assert instance.recent_sources["arknights"] == source
+
+    asyncio.run(check())
+
+
+def test_ark_tool_reads_require_explicit_source(plugin):
+    instance, Event, module = plugin
+    primary = SimpleNamespace(aliases={}, read=AsyncMock(return_value=_wiki_page()))
+    backup = SimpleNamespace(aliases={}, read=AsyncMock(return_value=_wiki_page()))
+    instance.services["arknights"] = module.ArknightsSources(primary, backup)
+
+    async def check():
+        result = json.loads(
+            await instance.wiki_read(Event(), 42, "", "技能", "arknights")
+        )
+        assert result["code"] == "bad_input"
+        primary.read.assert_not_awaited()
+        backup.read.assert_not_awaited()
+        result = json.loads(
+            await instance.wiki_read(Event(), 42, "", "技能", "arknights", "bwiki")
+        )
+        assert result["source_key"] == "bwiki"
+        backup.read.assert_awaited_once_with(42, "技能", "")
+        primary.read.assert_not_awaited()
+
+    asyncio.run(check())
+
+
+def test_choices_are_isolated_and_do_not_consume_unrelated_messages(plugin):
+    instance, Event, _ = plugin
+    service = instance.services["ys"]
+    service.search = AsyncMock(
+        return_value={
+            "status": "needs_choice",
+            "query": "测试",
+            "question": "技能",
+            "candidates": [
+                {"title": "角色", "page_id": 9, "url": "https://example.test/9"}
+            ],
+        }
+    )
+    service.read = AsyncMock(return_value=_wiki_page("角色", 9))
+
+    async def check():
+        await _collect(instance.wiki_command_ys(Event("ys 测试 技能")))
+        other_user = Event("1")
+        other_user.get_sender_id = lambda: "other-user"
+        other_group = Event("1", origin="other:GroupMessage:2")
+        for event in (other_user, other_group, Event("天气怎么样"), Event("/ys 1")):
+            await instance.wiki_followup(event)
+            assert not event.stopped and not event.sent
+        invalid = Event("ys 2")
+        assert "1–1" in (await _collect(instance.wiki_command_ys(invalid)))[0]
+        wrong_game = Event("sr 1")
+        assert "属于原神" in (await _collect(instance.wiki_command_sr(wrong_game)))[0]
+        service.read.assert_not_awaited()
+        assert service.search.await_count == 1
+        correct = Event("ys 1")
+        assert await _collect(instance.wiki_command_ys(correct)) == []
+        assert "已选择" in correct.sent[0]
+
+    asyncio.run(check())
+
+
+def test_expired_choices_and_topic_cannot_be_reused(plugin):
+    instance, Event, _ = plugin
+    service = instance.services["ys"]
+    service.search = AsyncMock(return_value=_wiki_page())
+    service.read = AsyncMock()
+
+    async def check():
+        with patch("qa_plugin.wiki.conversation.time.monotonic", return_value=100):
+            await _collect(instance.wiki_command_ys(Event("ys 纳西妲")))
+        with patch("qa_plugin.wiki.conversation.time.monotonic", return_value=701):
+            event = Event("突破材料呢")
+            await instance.wiki_followup(event)
+            assert not event.sent and not event.stopped
+            reply = await _collect(instance.wiki_command_ys(Event("ys 突破材料呢")))
+            assert "上下文已过期" in reply[0]
+            reply = await _collect(instance.wiki_command_ys(Event("ys 1")))
+            assert "候选已过期" in reply[0]
+        service.read.assert_not_awaited()
+
+    asyncio.run(check())
+
+
+def test_explicit_new_entity_and_game_replace_topic_without_leaking_context(plugin):
+    instance, Event, _ = plugin
+    instance.services["ys"].search = AsyncMock(return_value=_wiki_page())
+    instance.services["ys"].read = AsyncMock()
+    instance.services["sr"].search = AsyncMock(return_value=_wiki_page("流萤", 7))
+    instance.services["sr"].read = AsyncMock(return_value=_wiki_page("流萤", 7))
+
+    async def check():
+        await _collect(instance.wiki_command_ys(Event("ys 纳西妲")))
+        wrong = await _collect(instance.wiki_command_sr(Event("sr 突破材料呢")))
+        assert "已切换" in wrong[0]
+        instance.services["sr"].read.assert_not_awaited()
+        no_topic = Event("突破材料呢")
+        await instance.wiki_followup(no_topic)
+        assert not no_topic.stopped and not no_topic.sent
+        await _collect(instance.wiki_command_sr(Event("sr 流萤")))
+        followup = Event("战技10级呢")
+        await instance.wiki_followup(followup)
+        assert "流萤" in followup.sent[0] and "崩坏" in followup.sent[0]
+        instance.services["sr"].read.assert_awaited_once_with(7, "战技10级呢")
+        instance.services["ys"].read.assert_not_awaited()
+
+    asyncio.run(check())
+
+
+def test_candidate_expiration_and_missing_sender_do_not_share_state(plugin):
+    instance, Event, _ = plugin
+    instance.services["ys"].search = AsyncMock(
+        return_value={
+            "status": "needs_choice",
+            "query": "测试",
+            "question": "",
+            "candidates": [
+                {"title": "角色", "page_id": 9, "url": "https://example.test/9"}
+            ],
+        }
+    )
+    instance.services["ys"].read = AsyncMock()
+
+    async def check():
+        unknown = Event("ys 测试")
+        unknown.get_sender_id = lambda: ""
+        await _collect(instance.wiki_command_ys(unknown))
+        assert "2分钟内回复编号" not in unknown.sent[0]
+        assert not instance.conversations._entries
+        with patch("qa_plugin.wiki.conversation.time.monotonic", return_value=100):
+            await _collect(instance.wiki_command_ys(Event("ys 测试")))
+        with patch("qa_plugin.wiki.conversation.time.monotonic", return_value=221):
+            plain = Event("1")
+            await instance.wiki_followup(plain)
+            assert not plain.stopped and not plain.sent
+            reply = await _collect(instance.wiki_command_ys(Event("ys 1")))
+            assert "候选已过期" in reply[0]
+        instance.services["ys"].read.assert_not_awaited()
+
+    asyncio.run(check())
+
+
+def test_conversation_toggle_and_limits_apply_to_plain_replies(plugin):
+    instance, Event, _ = plugin
+    service = instance.services["ys"]
+    service.search = AsyncMock(return_value=_wiki_page())
+    service.read = AsyncMock(return_value=_wiki_page())
+
+    async def check():
+        await _collect(instance.wiki_command_ys(Event("ys 纳西妲")))
+        instance.conversation_enabled = False
+        event = Event("突破材料呢")
+        await instance.wiki_followup(event)
+        assert not event.stopped and not event.sent
+        instance.conversation_enabled = True
+        instance.limiter = type(instance.limiter)(cooldown=0, per_user=1)
+        instance._limited(Event(""))
+        limited = Event("突破材料呢")
+        await instance.wiki_followup(limited)
+        assert limited.stopped and "上限" in limited.sent[0]
+        service.read.assert_not_awaited()
+        instance.session_overrides[limited.unified_msg_origin] = False
+        disabled = Event("突破材料呢")
+        await instance.wiki_followup(disabled)
+        assert not disabled.stopped and not disabled.sent
+
+    asyncio.run(check())
+
+
+def test_doctor_handles_provider_timeout_and_cache_failure(plugin):
+    instance, Event, _ = plugin
+    instance.model_timeout = 0.01
+    instance.cache.health = AsyncMock(
+        return_value={
+            "readable": False,
+            "writable": False,
+            "entries": 0,
+            "bytes": 0,
+        }
+    )
+
+    async def slow(**kwargs):
+        await asyncio.sleep(1)
+
+    instance.context = SimpleNamespace(get_current_chat_provider_id=slow)
+    event = Event("ys doctor", admin=True)
+    assert asyncio.run(_collect(instance.wiki_command_ys(event))) == []
+    assert "读取失败" in event.sent[0] and "缓存读取：失败" in event.sent[0]
+
+
+@pytest.mark.parametrize("whitelist_allows", [False, True])
+def test_session_reset_restores_config_and_persists(plugin, whitelist_allows):
+    instance, Event, _ = plugin
+    event = Event("ys session reset", admin=True)
+    instance.sessions = {event.unified_msg_origin} if whitelist_allows else {"other"}
+    instance.session_overrides[event.unified_msg_origin] = not whitelist_allows
+    assert asyncio.run(_collect(instance.wiki_command_ys(event))) == []
+    assert instance._allowed(event) is whitelist_allows
+    assert "跟随配置" in event.sent[0] and "配置白名单" in event.sent[0]
+    assert instance._load_session_overrides(instance.data_dir) == {}
+
+
+def test_doctor_is_admin_only_local_and_reports_degradation(plugin):
+    instance, Event, _ = plugin
+    provider = AsyncMock(return_value="configured-provider")
+    instance.context = SimpleNamespace(get_current_chat_provider_id=provider)
+    instance.recent_outcomes["ys"] = "overview_rejected"
+    for client in instance.clients:
+        client._fetch = AsyncMock(side_effect=AssertionError("unexpected network"))
+
+    async def check():
+        denied = await _collect(instance.wiki_command_ys(Event("ys doctor")))
+        assert "管理员" in denied[0]
+        provider.assert_not_awaited()
+        event = Event("ys doctor", admin=True)
+        instance.session_overrides[event.unified_msg_origin] = False
+        assert await _collect(instance.wiki_command_ys(event)) == []
+        assert "ys, sr" in event.sent[0]
+        assert "缓存读取：正常" in event.sent[0] and "目录写入：正常" in event.sent[0]
+        assert "未验证实际调用" in event.sent[0] and "数字校验" in event.sent[0]
+        assert "关闭" in event.sent[0]
+        for client in instance.clients:
+            client._fetch.assert_not_awaited()
+        provider.side_effect = RuntimeError("private-provider-detail")
+        event = Event("ys doctor", admin=True)
+        await _collect(instance.wiki_command_ys(event))
+        assert (
+            "读取失败" in event.sent[0]
+            and "private-provider-detail" not in event.sent[0]
+        )
+
+    asyncio.run(check())
+
+
+def test_clear_cache_clears_shared_http_cache_once(plugin):
+    instance, Event, _ = plugin
+    instance.cache.clear = AsyncMock(return_value=7)
+    for service in instance.services.values():
+        service.clear_parse_cache = AsyncMock(return_value=2)
+    replies = asyncio.run(
+        _collect(instance.wiki_command_ys(Event("ys clear-cache", admin=True)))
+    )
+    instance.cache.clear.assert_awaited_once()
+    assert "HTTP 条目 7 条" in replies[0] and "已解析页面 4 个" in replies[0]
+    for service in instance.services.values():
+        service.clear_parse_cache.assert_awaited_once()

@@ -1,0 +1,123 @@
+"""Present a short, readable excerpt instead of dumping retrieval internals."""
+
+import re
+
+from .layout import excerpt, layout_blocks
+
+
+def source_links(result: dict) -> list[str]:
+    urls = [item.get("url") for item in result.get("evidence", [])]
+    return list(dict.fromkeys([u for u in urls if u] or [result["url"]]))[:2]
+
+
+def format_command(
+    result: dict, limit=1200, brief=350, detailed=750, excerpt_label=False
+):
+    if result["status"] in {"error", "not_found"}:
+        return result["message"]
+    if result["status"] == "needs_choice":
+        query = result.get("query", "")
+        choices = "\n\n".join(
+            "\n".join(
+                filter(
+                    None,
+                    (
+                        f"{index}. {item['title']}",
+                        item.get("snippet", "")[:60],
+                        item["url"],
+                    ),
+                )
+            )
+            for index, item in enumerate(result["candidates"][:5], 1)
+        )
+        reply = (
+            f"没有与「{query}」同名的条目，以下是搜索到的相关条目，"
+            "请确认后使用完整名称重新查询：\n\n" + choices
+        )
+        if result.get("suggestion_used"):
+            reply += (
+                f"\n\n已尝试纠错关键词「{result['suggestion_used']}」，请确认目标条目。"
+            )
+        if result.get("hint"):
+            reply += "\n\n" + result["hint"]
+        if result.get("command"):
+            reply += f"\n\n2分钟内回复编号，或发送 /{result['command']} 编号选择条目。"
+        return reply
+    title = result.get("display_title", result["title"])
+    source = "来源：\n" + "\n".join(source_links(result))
+    header = f"【{title}】"
+    if excerpt_label:
+        header += "\n\n原文摘录"
+    query = result.get("query")
+    normalized = result.get("normalized_query")
+    if (
+        query
+        and normalized
+        and query != normalized
+        and not normalized.startswith("卡牌：")
+    ):
+        header += f"（{query} → {normalized}）"
+    question = result.get("question", "")
+    budget = min(
+        detailed if question and question != query else brief,
+        limit - len(header) - len(source) - 160,
+    )
+    blocks, titles, used = [], {title, result["title"]}, 0
+    shortened = False
+    for item in result.get("evidence", [])[:2]:
+        clean = []
+        for line in item["text"].splitlines():
+            line = line.strip()
+            if not line or line in titles:
+                continue
+            clean.append(line)
+        arranged = layout_blocks("\n".join(clean))
+        selected = []
+        for index, block in enumerate(arranged):
+            room = budget - used
+            if room <= 0:
+                shortened = True
+                break
+            if re.fullmatch(r"【[^】]+】", block) and index + 1 < len(arranged):
+                next_block = arranged[index + 1]
+                first_sentence = re.split(r"(?<=[。！？])", next_block, maxsplit=1)[0]
+                if len(block) + len(first_sentence) + 2 > room:
+                    shortened = True
+                    break
+            if len(block) > room:
+                block = excerpt(block, room)
+                shortened = True
+            if block:
+                selected.append(block)
+                used += len(block) + 2
+            if shortened:
+                break
+        if selected:
+            heading = item["section"]
+            redundant = {
+                "概览",
+                title,
+                "基本信息",
+                "基础属性",
+                "介绍",
+                "简介",
+                "详细面板",
+            }
+            heading = "·".join(heading.split(" / ")[-2:])
+            label = "" if heading in redundant else f"【{heading}】\n"
+            blocks.append(label + "\n\n".join(selected))
+        if shortened:
+            break
+    if not blocks:
+        hint = "、".join(result.get("available_sections", [])[:6])
+        text = "此条目没有可展示的正文"
+        if hint:
+            text += f"，可尝试指定分节：{hint}"
+        blocks.append(text + "，请查看来源页面。")
+    else:
+        omitted = (result.get("selection") or {}).get("omitted_sections", 0)
+        if omitted:
+            blocks[-1] += f"\n…（另有 {omitted} 个相关分节未展示）"
+    if shortened and not blocks[-1].startswith("此条目没有可展示的正文"):
+        blocks[-1] += "\n…（节选）"
+    return "\n\n".join([header, *blocks, source])

@@ -1,0 +1,8 @@
+* text=auto eol=lf
+/.github export-ignore
+/tests export-ignore
+/scripts export-ignore
+/requirements-dev.txt export-ignore
+/pyproject.toml export-ignore
+/.gitignore export-ignore
+/.gitattributes export-ignore

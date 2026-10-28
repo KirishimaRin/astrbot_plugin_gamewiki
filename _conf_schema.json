@@ -1,0 +1,197 @@
+{
+  "conversation_enabled": {
+    "description": "候选编号选择与条目追问",
+    "type": "bool",
+    "default": true,
+    "hint": "按用户与会话隔离；候选2分钟、条目10分钟过期。允许直接回复编号或分节问题，关闭后仅使用完整名称查询"
+  },
+  "model_timeout_seconds": {
+    "description": "每次模型调用超时（秒）",
+    "type": "float",
+    "default": 20.0,
+    "hint": "2–60 秒；命令最多调用两次，超时返回原文摘录",
+    "slider": {
+      "min": 2,
+      "max": 60,
+      "step": 1
+    }
+  },
+  "overview_chars": {
+    "description": "模型概览目标字数上限",
+    "type": "int",
+    "default": 250,
+    "hint": "150–500 字；材料和数值列表可适当超出以保留完整信息",
+    "slider": {
+      "min": 150,
+      "max": 500,
+      "step": 50
+    }
+  },
+  "games": {
+    "description": "启用的游戏站点",
+    "type": "list",
+    "default": [
+      "ys",
+      "sr",
+      "zzz",
+      "arknights",
+      "zmd"
+    ],
+    "hint": "默认启用全部五款游戏。可用值：ys(原神)、sr(星穹铁道)、zzz(绝区零)、arknights(明日方舟)、zmd(终末地)；已有配置保留，可按需删减。空列表或无有效游戏时回退为全部启用"
+  },
+  "timeout_seconds": {
+    "description": "单次请求超时（秒）",
+    "type": "float",
+    "default": 8.0,
+    "hint": "单次 HTTP 请求的超时时间，范围 2–15 秒",
+    "slider": {
+      "min": 2,
+      "max": 15,
+      "step": 0.5
+    }
+  },
+  "query_timeout_seconds": {
+    "description": "整次查询超时（秒）",
+    "type": "float",
+    "default": 15.0,
+    "hint": "完整查询（搜索+补读）的总超时，范围 5–30 秒",
+    "slider": {
+      "min": 5,
+      "max": 30,
+      "step": 1
+    }
+  },
+  "search_cache_seconds": {
+    "description": "搜索缓存有效期（秒）",
+    "type": "int",
+    "default": 600,
+    "hint": "0–3600 秒；设为 0 后不再写入新搜索缓存",
+    "slider": {
+      "min": 0,
+      "max": 3600,
+      "step": 60
+    }
+  },
+  "page_cache_seconds": {
+    "description": "正文缓存有效期（秒）",
+    "type": "int",
+    "default": 21600,
+    "hint": "0–86400 秒；有效期内可能继续读取旧正文，clear-cache 可立即刷新；AKEData 数据表按版本隔离",
+    "slider": {
+      "min": 0,
+      "max": 86400,
+      "step": 600
+    }
+  },
+  "max_evidence_chars": {
+    "description": "工具返回正文字符上限",
+    "type": "int",
+    "default": 6000,
+    "hint": "1000–8000 字符",
+    "slider": {
+      "min": 1000,
+      "max": 8000,
+      "step": 100
+    }
+  },
+  "reply_brief_chars": {
+    "description": "降级原文摘录字数（名称查询）",
+    "type": "int",
+    "default": 350,
+    "hint": "200–1500 字；模型不可用时使用",
+    "slider": {
+      "min": 200,
+      "max": 1500,
+      "step": 50
+    }
+  },
+  "reply_question_chars": {
+    "description": "降级原文摘录字数（带问题）",
+    "type": "int",
+    "default": 750,
+    "hint": "300–2000 字；模型不可用时使用",
+    "slider": {
+      "min": 300,
+      "max": 2000,
+      "step": 50
+    }
+  },
+  "upstream_concurrency": {
+    "description": "对各数据源的并发请求数",
+    "type": "int",
+    "default": 2,
+    "hint": "1–8；调高可能触发站点限流",
+    "slider": {
+      "min": 1,
+      "max": 8,
+      "step": 1
+    }
+  },
+  "upstream_pace_seconds": {
+    "description": "请求启动间隔（秒）",
+    "type": "float",
+    "default": 0.3,
+    "hint": "0.1–2 秒，保护上游站点",
+    "slider": {
+      "min": 0.1,
+      "max": 2,
+      "step": 0.1
+    }
+  },
+  "user_cooldown_seconds": {
+    "description": "同一用户查询冷却（秒）",
+    "type": "float",
+    "default": 5.0,
+    "hint": "0–60 秒；0 为关闭。管理员不受限；AI 补读不冷却",
+    "slider": {
+      "min": 0,
+      "max": 60,
+      "step": 0.5
+    }
+  },
+  "user_rate_limit": {
+    "description": "单用户每分钟查询上限",
+    "type": "int",
+    "default": 6,
+    "hint": "0–60 次；0 为关闭",
+    "slider": {
+      "min": 0,
+      "max": 60,
+      "step": 1
+    }
+  },
+  "global_rate_limit": {
+    "description": "全插件每分钟查询上限",
+    "type": "int",
+    "default": 30,
+    "hint": "0–300 次；0 为关闭。保护数据源的最后一道闸",
+    "slider": {
+      "min": 0,
+      "max": 300,
+      "step": 5
+    }
+  },
+  "debug_log": {
+    "description": "调试日志",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后按查询输出分节选择与噪声过滤明细，用于排查站点改版"
+  },
+  "enabled_sessions": {
+    "description": "会话白名单",
+    "type": "list",
+    "default": [],
+    "hint": "留空表示全部会话可用；填入 unified_msg_origin（平台:类型:会话ID）只在这些会话启用"
+  },
+  "aliases": {
+    "description": "自定义昵称，每行 昵称=正式条目名",
+    "type": "list",
+    "default": []
+  },
+  "image_reply": {
+    "description": "命令查询附条目图片",
+    "type": "bool",
+    "default": true,
+    "hint": "命令查询时随回复发送条目卡面/缩略图；发送失败自动降级纯文本"
+  }
+}
