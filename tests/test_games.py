@@ -8,7 +8,7 @@ import httpx
 from wiki.cache import Cache
 from wiki.client import WikiClient
 from wiki.games import PROFILES, YS, parse_alias_config
-from wiki.models import page_url
+from wiki.models import Section, page_url
 from wiki.query import QueryService
 
 
@@ -131,3 +131,49 @@ def test_alias_config_splits_global_and_per_game_entries():
 def test_user_alias_does_not_leak_across_games():
     global_map, game_map = parse_alias_config(["ys:草神=纳西妲"])
     assert "草神" not in global_map and "sr" not in game_map
+
+
+def test_zmd_generic_skill_question_reaches_akedata_skill_sections():
+    from wiki.selection import evidence
+
+    sections = [
+        Section("基本信息", "info", ["干员基础信息。"]),
+        Section("战技 / 惊霆诀", "skill1", ["战技描述与等级数值。"]),
+        Section("终结技 / 万钧风雷", "ult", ["终结技描述与等级数值。"]),
+        Section("普通攻击 / 疾电法", "basic", ["普攻描述。"]),
+        Section("培养材料", "mat", ["突破材料清单。"]),
+    ]
+    for question in ("庄方宜技能", "庄方宜倍率", "庄方宜伤害"):
+        snippets, _, selection = evidence(
+            sections,
+            question,
+            3000,
+            "",
+            "庄方宜",
+            PROFILES["zmd"].intents,
+            PROFILES["zmd"].specifics,
+        )
+        picked = {item["section"] for item in snippets}
+        assert picked == {"战技 / 惊霆诀", "终结技 / 万钧风雷", "普通攻击 / 疾电法"}, (
+            question
+        )
+        assert selection["mode"] != "fallback", question
+
+
+def test_zmd_specific_material_question_still_routes_to_materials():
+    from wiki.selection import evidence
+
+    sections = [
+        Section("战技 / 惊霆诀", "skill1", ["战技描述。"]),
+        Section("培养材料", "mat", ["龙门币 × 120000"]),
+    ]
+    snippets, _, _ = evidence(
+        sections,
+        "庄方宜技能材料",
+        3000,
+        "",
+        "庄方宜",
+        PROFILES["zmd"].intents,
+        PROFILES["zmd"].specifics,
+    )
+    assert [item["section"] for item in snippets] == ["培养材料"]

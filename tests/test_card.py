@@ -61,3 +61,10 @@ def test_long_cards_are_truncated_at_the_height_cap():
 def test_empty_sections_render_a_title_only_card(latin_font):
     png = card.render_card("Only Title", "Source", [])
     assert png.startswith(b"\x89PNG")
+
+
+@pytest.mark.skipif(not _has_cjk_font(), reason="no CJK font on this host")
+def test_overlong_sections_are_capped_per_section():
+    png = card.render_card("标题", "", [("长分节", "一行文字\n" * 40)])
+    _, height = Image.open(io.BytesIO(png)).size
+    assert height < card.MAX_HEIGHT

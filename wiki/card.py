@@ -30,6 +30,7 @@ BODY_SIZE = 22
 LINE_GAP = 8
 SECTION_GAP = 18
 MAX_SECTIONS = 6
+MAX_LINES_PER_SECTION = 16
 
 INK = (31, 35, 40)
 MUTED = (101, 109, 118)
@@ -96,7 +97,11 @@ def render_card(title: str, source: str, sections: list[tuple[str, str]]):
 
     blocks = []
     for name, text in sections[:MAX_SECTIONS]:
-        blocks.append((name, wrap(text, body_font, body_width)))
+        lines = wrap(text, body_font, body_width)
+        if len(lines) > MAX_LINES_PER_SECTION:
+            # Long lore sections bow out; the text reply carries the rest.
+            lines = [*lines[: MAX_LINES_PER_SECTION - 1], "……"]
+        blocks.append((name, lines))
     content_height = 0
     for index, (name, lines) in enumerate(blocks):
         if index:

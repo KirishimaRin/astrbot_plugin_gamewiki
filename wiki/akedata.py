@@ -441,6 +441,14 @@ class AkeService:
                 if skill_level and not rows:
                     continue
                 skill_rows_found = skill_rows_found or bool(rows)
+                if not skill_level and len(rows) > 3:
+                    # A generic skill question keeps first and last levels;
+                    # mid-level numbers are one "战技N级" question away.
+                    rows = [
+                        *rows[:1],
+                        f"……（其余{len(rows) - 2}个等级略，可指定等级查询）",
+                        rows[-1],
+                    ]
                 add(
                     f"{label} / {name}",
                     [

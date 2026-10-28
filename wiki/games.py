@@ -95,7 +95,9 @@ ZMD = GameProfile(
     code="zmd",
     name="明日方舟:终末地",
     command="zmd",
-    intents=(),
+    # AKEData titles skill sections "战技 / 惊霆诀"-style, so the generic
+    # skill words need their own heading row beyond selection.INTENTS.
+    intents=((("技能", "倍率", "伤害"), ("战技", "终结技", "普通攻击", "连携技"), ()),),
     specifics=(
         (("终结技", "大招"), "终结技"),
         (("战技",), "战技"),

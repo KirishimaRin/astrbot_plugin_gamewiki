@@ -373,3 +373,30 @@ def test_tables_larger_than_mediawiki_response_limit_are_supported(tmp_path):
             await client.close()
 
     asyncio.run(run())
+
+
+def test_generic_skill_questions_collapse_mid_levels(tmp_path):
+    async def run():
+        client, service, calls, data = setup(tmp_path)
+        data["SkillPatchTable"]["skill"]["SkillPatchDataBundle"] = [
+            {
+                "level": level,
+                "blackboard": [{"key": "atk_scale", "value": 1.0 + level}],
+                "subDescDataList": [
+                    {"name": {"text": "伤害倍率"}, "desc": f"{level * 10}%"}
+                ],
+            }
+            for level in range(1, 7)
+        ]
+        try:
+            result = await service.search("祀", "技能")
+            body = "\n".join(e["text"] for e in result["evidence"])
+            assert "等级1" in body and "等级6" in body
+            assert "其余4个等级略" in body and "等级3" not in body
+            focused = await service.search("祀", "技能3级")
+            focused_body = "\n".join(e["text"] for e in focused["evidence"])
+            assert "等级3" in focused_body and "其余" not in focused_body
+        finally:
+            await client.close()
+
+    asyncio.run(run())
