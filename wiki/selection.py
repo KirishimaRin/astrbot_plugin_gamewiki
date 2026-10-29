@@ -2,6 +2,7 @@
 
 import re
 from .models import Section
+from .games import YS_SPECIFICS
 
 
 def terms(text: str) -> set[str]:
@@ -94,14 +95,6 @@ def select_lines(block: str, fields: tuple, default: bool) -> str:
     return "\n".join(lines)
 
 
-# Default (Genshin) routing from question words to a section label.
-YS_SPECIFICS = (
-    (("战技",), "元素战技"),
-    (("大招", "爆发"), "元素爆发"),
-    (("普攻", "普通攻击", "重击"), "普通攻击"),
-)
-
-
 def evidence(
     sections: list[Section],
     question: str,
@@ -128,6 +121,16 @@ def evidence(
         "",
     )
     candidates = [s for s in sections if not section or section in s.title]
+    # PRTS's parent skill section only lists unlock navigation. Its child
+    # sections carry the actual skills, including skill 3.
+    candidates = [
+        s
+        for s in candidates
+        if not (
+            s.blocks
+            and all(re.fullmatch(r"技能\d+（精英\d+开放）", b) for b in s.blocks)
+        )
+    ]
     # Page templates can emit one heading twice (BWIKI repeats 行迹/技能晋阶
     # 材料 blocks); the first copy is authoritative and repeats only burn the
     # evidence budget and the card layout.
@@ -149,7 +152,15 @@ def evidence(
     if section and not candidates:
         return [], False, meta("section", [])
     if specific:
-        subset = [s for s in candidates if specific in s.title]
+        subset = [
+            s
+            for s in candidates
+            if (
+                any(part.strip().startswith("突破") for part in s.title.split("/"))
+                if specific == "突破"
+                else specific in s.title
+            )
+        ]
         if subset:
             candidates = subset
     elif headings and not section:

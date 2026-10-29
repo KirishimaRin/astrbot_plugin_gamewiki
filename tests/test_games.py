@@ -266,3 +266,97 @@ def test_every_game_profile_declares_a_card_accent():
     for profile in PROFILES.values():
         assert len(profile.accent) == 3, profile.code
         assert all(0 <= channel <= 255 for channel in profile.accent), profile.code
+
+
+def test_ark_archive_and_stats_cover_both_source_heading_schemes():
+    from wiki.selection import evidence
+
+    for archive, stats in (("干员档案", "属性"), ("人员档案", "基本属性")):
+        sections = [
+            Section("基本信息", "", ["阵营与姓名。"]),
+            Section(archive, "", ["故事正文。"]),
+            Section(stats, "", ["生命与攻击。"]),
+        ]
+        for question, expected in (("故事", archive), ("属性", stats)):
+            snippets, _, meta = evidence(
+                sections,
+                question,
+                4000,
+                "",
+                "能天使",
+                PROFILES["arknights"].intents,
+                PROFILES["arknights"].specifics,
+            )
+            assert [s["section"] for s in snippets] == [expected]
+            assert meta["mode"] == "focused"
+
+
+def test_prts_skill_unlock_navigation_does_not_displace_skill_three():
+    from wiki.selection import evidence
+
+    sections = [
+        Section(
+            "技能",
+            "",
+            ["技能1（精英0开放）", "技能2（精英1开放）", "技能3（精英2开放）"],
+        ),
+        *[
+            Section(f"技能 / 技能{i}", "技能", [f"技能{i}的效果。倍率120%。"])
+            for i in range(1, 4)
+        ],
+    ]
+    snippets, _, _ = evidence(
+        sections,
+        "技能",
+        6000,
+        "",
+        "能天使",
+        PROFILES["arknights"].intents,
+        PROFILES["arknights"].specifics,
+    )
+    assert [s["section"] for s in snippets] == [
+        "技能 / 技能1",
+        "技能 / 技能2",
+        "技能 / 技能3",
+    ]
+
+
+def test_ys_specific_skill_and_ascension_questions_do_not_include_other_sections():
+    from wiki.selection import evidence
+
+    sections = [
+        Section("突破", "", ["摩拉 × 20000"]),
+        Section("技能升级材料", "", ["摩拉 × 12500"]),
+        Section("天赋 / 普通攻击", "", ["普攻伤害。"]),
+        Section(
+            "天赋 / 固有天赋 / 某能力 角色突破等级1解锁", "", ["突破时解锁的被动。"]
+        ),
+        Section("天赋 / 元素战技", "", ["战技伤害。"]),
+    ]
+    for question, expected in (
+        ("突破材料", "突破"),
+        ("元素战技10级倍率", "天赋 / 元素战技"),
+    ):
+        snippets, _, _ = evidence(
+            sections,
+            question,
+            6000,
+            "",
+            "纳西妲",
+            PROFILES["ys"].intents,
+            PROFILES["ys"].specifics,
+        )
+        assert [s["section"] for s in snippets] == [expected]
+
+
+def test_bwiki_operator_css_grids_preserve_levels_and_skill_boundaries():
+    html = '<h2><span id="技能">技能</span></h2>' + "".join(
+        f'<div class="switch-tab-content operator"><p>技能名{i} 自动回复 自动触发</p><div class="skill-table-grid skill-table-header"><div>等级</div><div>描述</div><div>初始</div><div>消耗</div><div>持续</div></div><div class="skill-table-grid"><div>1</div><div>攻击变为{i}连射</div><div>20</div><div>50</div><div>15</div></div></div>'
+        for i in range(1, 4)
+    )
+    from wiki.extractor import extract_sections
+
+    sections = extract_sections(html, "干员", prefix="arknights", source="bwiki")
+    skill = next(s for s in sections if s.title == "技能 / 技能3")
+    assert "1 | 攻击变为3连射 | 20 | 50 | 15" in "\n".join(skill.blocks)
+    assert "自动触发" in "\n".join(skill.blocks)

@@ -6,6 +6,13 @@ live in cleaning/selection; game terms and source addresses belong here.
 
 from dataclasses import dataclass, field
 
+YS_SPECIFICS = (
+    (("突破材料", "突破"), "突破"),
+    (("战技",), "元素战技"),
+    (("大招", "爆发"), "元素爆发"),
+    (("普攻", "普通攻击", "重击"), "普通攻击"),
+)
+
 
 @dataclass(frozen=True)
 class GameProfile:
@@ -29,6 +36,7 @@ YS = GameProfile(
     name="原神",
     command="ys",
     intents=(),
+    specifics=YS_SPECIFICS,
     card_words=("七圣", "卡牌", "角色牌"),
     accent=(64, 145, 108),
 )
@@ -103,9 +111,9 @@ ARKNIGHTS = GameProfile(
     specifics=(
         (("专精", "技能升级", "技能材料"), "技能升级材料"),
         (("精英化",), "精英化"),
-        # PRTS 干员页没有「角色故事」分节，正文档案在「人员档案」，
-        # 「干员模组」命中的只是模块剧情。
-        (("故事", "身世", "背景", "经历", "剧情", "档案"), "人员档案"),
+        # PRTS uses 干员档案; BWIKI uses 人员档案.
+        (("故事", "身世", "背景", "经历", "剧情", "档案"), "档案"),
+        (("属性", "面板"), "属性"),
         (("技能3", "第三技能", "三技能"), "技能3"),
         (("技能2", "第二技能", "二技能"), "技能2"),
         (("技能1", "第一技能", "一技能"), "技能1"),

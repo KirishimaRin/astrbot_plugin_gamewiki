@@ -137,3 +137,13 @@ python scripts/check_framework.py
 ## 核心共享依赖兼容检查
 
 CI 的 framework 任务在下载 AstrBot 4.29.3 wheel 后运行 `python scripts/check_dependencies.py`。该脚本读取真实 Requires-Dist，提取与插件共享的包，以当前 CI 安装版本生成保护约束，再对插件 requirements 执行 `pip install --dry-run --ignore-installed --no-deps` 联合求解。这模拟受保护版本的直接依赖兼容，不安装完整 AstrBot 服务。当前3.11+测试 Pillow13，3.10测试12.3；Pillow13自身要求Python3.11+。`requirements-constraints.txt` 仅用于开发/CI，不随插件ZIP安装。
+
+## 卡片跨源回放
+
+`scripts/audit_cards.py` 接收本地 JSON 清单，覆盖实际提取、证据选择、命令卡片分流和 PNG 绘制。每项含 `id/game/source/title/question/url`，以及相对清单目录的 `html_path`（HTML 或 MediaWiki parse JSON）或 `result_path`（检索结果 JSON）。可用 `required_sections`、`required_text` 检查选中分节与真实绘制文本；`expect_skip` 标记已知页面缺少可用方面节的用例。
+
+```bash
+python scripts/audit_cards.py research/card-cases.json --output research/card-review
+```
+
+脚本对绘制文字检查左右及底部边界，记录渲染时间、所选分节、实际文字和 PNG 路径。用例逐项报告；遇到断言失败继续收集结果，最终返回非零退出码。模型概览使用固定回复。审计前记录快照的实际来源主机，不用 BWIKI 页面替代 PRTS 主源；未发卡用例单独计数。真实页面快照和渲染产物保持忽略；离线测试用合成结构覆盖这些来源形态。

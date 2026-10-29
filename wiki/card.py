@@ -104,15 +104,162 @@ def _table_sections(name, text):
         while end < len(lines) and "|" in lines[end]:
             row = [c.strip() for c in lines[end].split("|")]
             if len(row) == len(cells):
-                value = f"{cells[1]} {row[1]}"
-                if len(cells) > 2:
-                    value += f"  /  {cells[-1]} {row[-1]}"
-                rows.append((row[0], value))
+                populated = [j for j in range(1, len(row)) if row[j]]
+                if populated:
+                    low, high = populated[0], populated[-1]
+                    value = f"{cells[low]} {row[low]}"
+                    if high != low:
+                        value += f"  /  {cells[high]} {row[high]}"
+                    rows.append((row[0], value))
             end += 1
         if rows:
             groups.append((label, "\n".join(prose), rows))
         start = end
     return groups or [(name, text, [])]
+
+
+MATERIAL = re.compile(r"([\w·「」（）()\-]{1,40})\s*×\s*(\d+(?:\.\d+)?(?:万|亿|w)?)")
+
+
+def _structured_sections(name, text):
+    """Adapt observed material lists and vertical/horizontal stat tables."""
+    if text.strip() and all(
+        v.strip() in {"未加强", "加强", "描述"} for v in text.splitlines()
+    ):
+        return []
+    if re.search(r"材料|突破|精英化", name) and MATERIAL.search(
+        "\n".join(layout_blocks(text))
+    ):
+        paired = []
+        for line in text.splitlines():
+            cells = [v.strip() for v in line.split("|")]
+            for j in range(len(cells) - 1):
+                if re.fullmatch(r"(?:精英阶段)?\d+[→➜]\d+", cells[j]):
+                    pairs = [
+                        (m[1], "× " + m[2]) for m in MATERIAL.finditer(cells[j + 1])
+                    ]
+                    if pairs:
+                        paired.append((name + " · " + cells[j], "", pairs))
+        if paired:
+            return paired[:2]
+        groups, label = [], name
+        for block in layout_blocks(text):
+            matches = list(MATERIAL.finditer(block))
+            if not matches:
+                stages = re.findall(
+                    r"精英阶段\s*\d+|\d+级|[^\n]*(?:总计|共计)[^\n]*|升级所需经验",
+                    block,
+                )
+                if stages:
+                    label = stages[-1]
+                continue
+            prefix = block[: matches[0].start()].strip(" ：:\n")
+            if prefix:
+                prefix = prefix.splitlines()[0]
+                label = label + " · " + prefix if label == "升级所需经验" else prefix
+            pairs = list(dict.fromkeys((m[1], "× " + m[2]) for m in matches))
+            groups.append((name + " · " + label if label != name else name, "", pairs))
+        totals = [g for g in groups if re.search(r"总计|共计", g[0])]
+        return totals[:2] or groups[:2]
+
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        header = [v.strip() for v in line.split("|")]
+        if header[0] not in {"等级", "", "详细属性"} or len(header) < 3:
+            continue
+        rows = []
+        for raw in lines[i + 1 :]:
+            if "|" not in raw:
+                break
+            row = [v.strip() for v in raw.split("|")]
+            if len(row) == len(header):
+                rows.append(row)
+        if not rows:
+            continue
+        if any(h.startswith("描述") for h in header):
+            row = next(
+                (r for r in rows if re.fullmatch(r"\d+|Rank [ⅠⅡⅢ]+", r[0])), None
+            )
+            if row is None:
+                continue
+            skill = [v.strip() for v in lines[0].split("|")]
+            label = skill[1] if len(skill) > 1 and not skill[0] else ""
+            facts = []
+            for j, h in enumerate(header):
+                if h.startswith(("初始", "消耗", "持续")) and row[j]:
+                    key = (
+                        "初始技力"
+                        if h.startswith("初始")
+                        else "消耗技力"
+                        if h.startswith("消耗")
+                        else "持续时间"
+                    )
+                    value = re.sub(r"^(?:初始|消耗|持续)\s*", "", row[j])
+                    facts.append(
+                        (
+                            key,
+                            value
+                            + (
+                                " 秒"
+                                if key == "持续时间" and not value.endswith(("秒", "s"))
+                                else ""
+                            ),
+                        )
+                    )
+            return [
+                (
+                    name + (" · " + label if label else "") + " · 等级" + row[0],
+                    row[1],
+                    facts,
+                )
+            ]
+        if header[0] == "等级":
+            # A subheader carries before/after ascension labels; never lose it.
+            sub = rows[0] if rows and rows[0][0] in {"", "等级"} else None
+            candidates = [
+                r
+                for r in rows
+                if re.fullmatch(r"\d+(?:级)?", r[0])
+                and sum(bool(v) for v in r[1:]) >= 3
+            ]
+            if not candidates:
+                continue
+            result = []
+            for row in (
+                [candidates[0], candidates[-1]] if len(candidates) > 1 else candidates
+            ):
+                facts, seen = [], set()
+                for j in range(1, len(header)):
+                    if header[j] in seen or not row[j]:
+                        continue
+                    seen.add(header[j])
+                    label = header[j] + (" · " + sub[j] if sub and sub[j] else "")
+                    facts.append((label, row[j]))
+                result.append(
+                    (name + " · " + row[0].removesuffix("级") + "级", "", facts[:3])
+                )
+            return result
+        if not header[0] and any("精" in h or "MAX" in h for h in header[1:]):
+            cols = [
+                j
+                for j in range(1, len(header))
+                if header[j] and not header[j].startswith("信赖")
+            ]
+            return (
+                [
+                    (
+                        name + " · " + header[j].split(" 不包括")[0],
+                        "不包括" + header[j].split(" 不包括", 1)[1]
+                        if " 不包括" in header[j]
+                        else "",
+                        [(r[0], r[j]) for r in rows if r[0] and r[j]][:3],
+                    )
+                    for j in dict.fromkeys([cols[0], cols[-1]])
+                ]
+                if cols
+                else []
+            )
+    return _table_sections(name, text)
 
 
 def _content(text, table_rows):
@@ -133,11 +280,18 @@ def _content(text, table_rows):
             descriptions.append(line)
     # Use the first complete sentence when possible; subsequent prose stays in
     # the text reply/source. Never splice two unrelated clauses into a summary.
-    prose = "\n".join(descriptions)
+    narrative = [
+        line
+        for line in descriptions
+        if re.search(r"[。！？]", line) and not line.startswith("【")
+    ]
+    prose = narrative[0] if narrative else "\n".join(descriptions)
     first = re.match(r".*?[。！？]", prose, re.S)
     if first:
         prose = first[0]
-    return prose, facts[:2]
+    return prose, facts[:12] if facts and all(
+        v.startswith("× ") for _, v in facts
+    ) else facts[:3]
 
 
 def render_card(
@@ -170,7 +324,7 @@ def render_card(
     groups = [
         group
         for name, text in sections[:MAX_SECTIONS]
-        for group in _table_sections(name, text)
+        for group in _structured_sections(name, text)
     ]
     groups = groups[:MAX_SECTIONS]
     # Share the height budget across topics, so the first skill cannot consume
@@ -180,6 +334,14 @@ def render_card(
     blocks = []
     for name, text, table_rows in groups:
         prose, facts = _content(text, table_rows)
+        material_grid = bool(facts) and all(
+            value.startswith("× ") for _, value in facts
+        )
+        parts = name.split(" / ")
+        if parts[0] == "天赋" and len(parts) >= 3:
+            name = parts[-1] if "：" in parts[-1] else " · ".join(parts[-2:])
+        elif parts[0] == "技能" and len(parts) == 2:
+            name = parts[-1]
         heading = (
             bounded(name.replace(" / ", " · "), section_font, body_width, 2)
             if name
@@ -188,14 +350,37 @@ def render_card(
         heading_h = len(heading) * 36
         rows = []
         used = heading_h + 58
-        # Reserve readable space for two numerical rows before sizing prose.
+        if material_grid:
+            facts = [
+                (
+                    f"{facts[i][0]} {facts[i][1]}",
+                    f"{facts[i + 1][0]} {facts[i + 1][1]}"
+                    if i + 1 < len(facts)
+                    else "",
+                )
+                for i in range(0, len(facts), 2)
+            ]
         for key, value in facts:
-            key_lines = wrap(key, small_font, 146)
-            value_lines = wrap(value, body_font, body_width - 166)
+            key_lines = wrap(
+                key,
+                body_font if material_grid else small_font,
+                (body_width - 20) // 2 if material_grid else 146,
+            )
+            value_lines = wrap(
+                value,
+                body_font,
+                (body_width - 20) // 2 if material_grid else body_width - 166,
+            )
             # Never cut a numerical field mid-value or remove its unit.
             if len(key_lines) > 2 or len(value_lines) > 2:
                 continue
-            row_h = max(len(key_lines) * 29, len(value_lines) * 35) + 16
+            row_h = (
+                max(
+                    len(key_lines) * (35 if material_grid else 29),
+                    len(value_lines) * 35,
+                )
+                + 16
+            )
             if used + row_h + line_height > budget:
                 break
             rows.append((key_lines, value_lines, row_h))
@@ -211,7 +396,7 @@ def render_card(
             + sum(r[2] for r in rows)
             + 18
         )
-        blocks.append((heading, lines, rows, block_h))
+        blocks.append((heading, lines, rows, block_h, material_grid))
 
     band_height = 12
     height = min(MAX_HEIGHT, top + sum(b[3] for b in blocks) + 18 * len(blocks) + 74)
@@ -221,7 +406,7 @@ def render_card(
     label = bounded(title.strip(), title_font, WIDTH - MARGIN * 2, 1)[0]
     draw.text((MARGIN, 29), label, font=title_font, fill=INK)
     y = top
-    for index, (heading, lines, rows, block_h) in enumerate(blocks):
+    for index, (heading, lines, rows, block_h, material_grid) in enumerate(blocks):
         if index % 2:
             draw.rounded_rectangle(
                 [MARGIN - 8, y, WIDTH - MARGIN + 8, y + block_h], radius=12, fill=ZEBRA
@@ -241,10 +426,21 @@ def render_card(
         for keys, values, row_h in rows:
             draw.line([text_x, y, WIDTH - text_x, y], fill=RULE)
             for i, line in enumerate(keys):
-                draw.text((text_x, y + 9 + i * 29), line, font=small_font, fill=MUTED)
+                draw.text(
+                    (text_x, y + 5 + i * (35 if material_grid else 29)),
+                    line,
+                    font=body_font if material_grid else small_font,
+                    fill=INK if material_grid else MUTED,
+                )
             for i, line in enumerate(values):
                 draw.text(
-                    (text_x + 166, y + 5 + i * 35), line, font=body_font, fill=INK
+                    (
+                        text_x + ((body_width + 20) // 2 if material_grid else 166),
+                        y + 5 + i * 35,
+                    ),
+                    line,
+                    font=body_font,
+                    fill=INK,
                 )
             y += row_h
         y += 36

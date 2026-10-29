@@ -169,3 +169,78 @@ def test_overlong_sections_are_capped_per_section():
     png = card.render_card("标题", "", [("长分节", "一行文字\n" * 40)])
     _, height = Image.open(io.BytesIO(png)).size
     assert height < card.MAX_HEIGHT
+
+
+def test_empty_endpoint_levels_are_not_attached_to_values():
+    groups = card._table_sections(
+        "战技",
+        "造成伤害。\n详细属性 | LV1 | LV2 | LV3\n伤害 | 20% | 30% | \n冷却 | 5秒 | | ",
+    )
+    assert groups[0][2] == [("伤害", "LV1 20%  /  LV2 30%"), ("冷却", "LV1 5秒")]
+
+
+def test_material_columns_keep_stage_and_quoted_names():
+    groups = card._structured_sections(
+        "技能升级材料",
+        "等级 | 所需材料 | 等级 | 所需材料\n1→2 | 「巧思」的教导 × 3 摩拉 × 12500 | 6→7 | 「巧思」的哲学 × 4 摩拉 × 120000",
+    )
+    assert groups == [
+        ("技能升级材料 · 1→2", "", [("「巧思」的教导", "× 3"), ("摩拉", "× 12500")]),
+        ("技能升级材料 · 6→7", "", [("「巧思」的哲学", "× 4"), ("摩拉", "× 120000")]),
+    ]
+
+
+def test_prts_stats_keep_stage_and_excluded_bonus_condition():
+    groups = card._structured_sections(
+        "属性",
+        " | 精英0 1级 不包括 信赖 及 潜能 加成 | 精英2 满级 不包括 信赖 及 潜能 加成 | 信赖加成上限\n生命上限 | 711 | 1673 | \n攻击 | 183 | 540 | 90\n防御 | 57 | 161 | ",
+    )
+    assert groups[1] == (
+        "属性 · 精英2 满级",
+        "不包括 信赖 及 潜能 加成",
+        [("生命上限", "1673"), ("攻击", "540"), ("防御", "161")],
+    )
+
+
+def test_projected_skill_level_keeps_description_cost_and_duration():
+    groups = card._structured_sections(
+        "技能 / 技能3",
+        " | 过载模式 | 自动回复 自动触发\n等级 | 描述 显示算法 | 初始 预置的技力 | 消耗 需要的技力 | 持续 时间（秒）\n7 | 攻击变为5连射，技能会自动开启 | 20 | 38 | 15",
+    )
+    assert groups == [
+        (
+            "技能 / 技能3 · 过载模式 · 等级7",
+            "攻击变为5连射，技能会自动开启",
+            [("初始技力", "20"), ("消耗技力", "38"), ("持续时间", "15 秒")],
+        )
+    ]
+
+
+def test_story_excerpt_uses_narrative_instead_of_unlock_navigation():
+    prose, _ = card._content(
+        "干员档案\n基础档案\n初始开放\n【代号】能天使【体检】确认为非感染者。\n客观履历\n初始开放\n能天使，拉特兰公民。企鹅物流成员。",
+        [],
+    )
+    assert prose == "能天使，拉特兰公民。"
+
+
+def test_material_grid_keeps_later_items_with_their_quantities(latin_font, monkeypatch):
+    drawn = []
+    original = card.ImageDraw.ImageDraw.text
+
+    def capture(draw, xy, text, *args, **kwargs):
+        drawn.append(text)
+        return original(draw, xy, text, *args, **kwargs)
+
+    monkeypatch.setattr(card.ImageDraw.ImageDraw, "text", capture)
+    card.render_card(
+        "Materials",
+        "Source",
+        [
+            (
+                "突破",
+                "0~90级共计需要\n" + " ".join(f"item{i} × {i + 1}" for i in range(12)),
+            )
+        ],
+    )
+    assert "item11 × 12" in drawn

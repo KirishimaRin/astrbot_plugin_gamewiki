@@ -338,3 +338,18 @@ class TestImageGating(unittest.IsolatedAsyncioTestCase):
         assert IDENTITY.search("汤汤立绘")
         # Bare names still parse as entities, not questions.
         assert literal_intent("汤汤武器", Service()) is None
+
+
+@pytest.mark.parametrize("mode,section", [("fallback", "故事"), ("focused", "概览")])
+def test_unstructured_or_fallback_evidence_does_not_get_an_aspect_card(mode, section):
+    async def run():
+        result = page()
+        result["evidence"] = [{"section": section, "text": "职业术师，武器手铳。"}]
+        result["selection"] = {"mode": mode}
+        _, metrics = await CommandAssistant(
+            AsyncMock(return_value="请查看原文中的相关资料。")
+        ).answer("纳西妲 技能", PROFILES["ys"], Service(result))
+        assert "card" not in metrics
+        assert "image_url" not in metrics
+
+    asyncio.run(run())
