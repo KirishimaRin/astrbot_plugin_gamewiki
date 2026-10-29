@@ -15,6 +15,9 @@ from PIL import Image, ImageDraw, ImageFont
 from .layout import layout_blocks
 
 FONT_CANDIDATES = (
+    "/usr/local/share/fonts/MiSans-Regular.ttf",
+    "/usr/share/fonts/truetype/misans/MiSans-Regular.ttf",
+    "C:/Windows/Fonts/MiSans-Regular.ttf",
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
     "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
     "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
@@ -44,9 +47,32 @@ NEUTRAL = (96, 111, 131)
 TOKEN = re.compile(r"[!-~]+|\s+|.")
 
 
-def _font_path():
-    for candidate in FONT_CANDIDATES:
-        if Path(candidate).exists():
+@lru_cache(maxsize=32)
+def _usable_font(path, modified, size):
+    """Probe once per file revision, so a broken optional font can fall back."""
+    try:
+        ImageFont.truetype(path, 12, index=_face_index(path))
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def _font_exists(path):
+    try:
+        info = Path(path).stat()
+        return _usable_font(str(path), info.st_mtime_ns, info.st_size)
+    except OSError:
+        return False
+
+
+def _font_path(font_dir=None):
+    local = (
+        [str(Path(font_dir) / f"MiSans-Regular.{ext}") for ext in ("ttf", "otf")]
+        if font_dir is not None
+        else []
+    )
+    for candidate in (*local, *FONT_CANDIDATES):
+        if _font_exists(candidate):
             return candidate
     return None
 
@@ -71,12 +97,13 @@ def _weight_path(path, bold):
         path = str(path)
         stem = Path(path).stem
         candidates = (
+            path.replace("-Regular", "-Medium") if stem.startswith("MiSans") else path,
             path.replace("-Regular", "-Bold"),
             str(Path(path).with_name(stem + "-Bold" + Path(path).suffix)),
             path.replace("msyh.ttc", "msyhbd.ttc"),
         )
         for candidate in candidates:
-            if candidate != path and Path(candidate).is_file():
+            if candidate != path and _font_exists(candidate):
                 return candidate
     return path
 
@@ -85,6 +112,22 @@ def _weight_path(path, bold):
 def _font(path, size, bold=False):
     path = _weight_path(path, bold)
     return ImageFont.truetype(path, size, index=_face_index(path))
+
+
+def clear_font_cache():
+    """A plugin reload also picks up font files replaced at the same path."""
+    _font.cache_clear()
+    _face_index.cache_clear()
+    _usable_font.cache_clear()
+
+
+def font_description(font_dir):
+    path = _font_path(font_dir)
+    if path is None:
+        return "未找到可用字体，跳过卡片"
+    family, regular = _font(path, BODY_SIZE).getname()
+    _, heading = _font(path, SECTION_SIZE, bold=True).getname()
+    return f"{family}（正文 {regular}，标题 {heading}）；{path}"
 
 
 def wrap(text: str, font, max_width: int) -> list[str]:
@@ -326,10 +369,15 @@ def _content(text, table_rows):
 
 
 def render_card(
-    title: str, source: str, sections: list[tuple[str, str]], accent: tuple = ()
+    title: str,
+    source: str,
+    sections: list[tuple[str, str]],
+    accent: tuple = (),
+    *,
+    font_dir=None,
 ):
     """Return a compact excerpt card, or None without a usable CJK font."""
-    path = _font_path()
+    path = _font_path(font_dir) if font_dir is not None else _font_path()
     if path is None:
         return None
     accent = tuple(accent) if accent else NEUTRAL

@@ -745,10 +745,11 @@ def test_evidence_card_is_rendered_locally_and_sent(plugin):
     event.image_result = lambda path: ("image", path)
     accent = (196, 148, 38)
 
-    def fake_render(title, source, sections, accent_arg=()):
+    def fake_render(title, source, sections, accent_arg=(), *, font_dir=None):
         assert title == "汤汤" and source == "终末地 AKEData"
         assert sections == [("战技", "伤害 320%")]
         assert accent_arg == accent
+        assert font_dir == instance.data_dir / "fonts"
         return b"\x89PNG-fake"
 
     with patch.object(module, "render_card", fake_render):
@@ -783,7 +784,7 @@ def test_evidence_card_carries_the_game_accent(plugin):
     event.image_result = lambda path: ("image", path)
     captured = {}
 
-    def fake_render(title, source, sections, accent=()):
+    def fake_render(title, source, sections, accent=(), *, font_dir=None):
         captured["accent"] = accent
         return b"\x89PNG-fake"
 
@@ -810,14 +811,29 @@ def test_evidence_card_is_skipped_when_the_reply_falls_back_to_excerpt(plugin):
 def test_evidence_card_without_font_or_on_error_sends_nothing(plugin):
     instance, Event, module = plugin
     event = Event("")
-    with patch.object(module, "render_card", lambda *a: None):
+    with patch.object(module, "render_card", lambda *a, **kw: None):
         asyncio.run(
             instance._send_card(event, {"title": "t", "source": "s", "sections": []})
         )
     with patch.object(
-        module, "render_card", lambda *a: (_ for _ in ()).throw(RuntimeError("x"))
+        module, "render_card", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("x"))
     ):
         asyncio.run(
             instance._send_card(event, {"title": "t", "source": "s", "sections": []})
         )
     assert event.sent == []
+
+
+def test_doctor_reports_the_plugin_directory_font(plugin):
+    instance, Event, module = plugin
+    regular = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
+    if not regular.exists():
+        pytest.skip("no font for the local font directory check")
+    directory = instance.data_dir / "fonts"
+    directory.mkdir(parents=True)
+    font = directory / "MiSans-Regular.ttf"
+    font.write_bytes(regular.read_bytes())
+    text = asyncio.run(instance._doctor_text(Event("ys doctor")))
+    assert str(directory) in text
+    assert str(font) in text
+    assert "DejaVu Sans" in text

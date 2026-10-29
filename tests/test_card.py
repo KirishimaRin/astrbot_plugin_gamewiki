@@ -17,9 +17,14 @@ def test_render_card_skips_hosts_without_fonts(monkeypatch):
 
 
 @pytest.fixture()
-def latin_font(monkeypatch):
+def font_file():
     if not Path(DEJAVU).exists():
         pytest.skip("no font available for card rendering")
+    return Path(DEJAVU)
+
+
+@pytest.fixture()
+def latin_font(monkeypatch, font_file):
     monkeypatch.setattr(card, "_font_path", lambda: DEJAVU)
 
 
@@ -264,3 +269,54 @@ def test_hosts_without_a_bold_sibling_keep_a_usable_font(latin_font, tmp_path):
     heading = card._font(str(path), card.SECTION_SIZE, bold=True)
     assert heading.getlength("Readable title") > 0
     assert heading.getname() == card._font(str(path), card.BODY_SIZE).getname()
+
+
+def test_plugin_font_directory_takes_priority_and_prefers_medium(
+    font_file, tmp_path, monkeypatch
+):
+    regular = tmp_path / "MiSans-Regular.ttf"
+    medium = tmp_path / "MiSans-Medium.ttf"
+    bold = tmp_path / "MiSans-Bold.ttf"
+    for path in (regular, medium, bold):
+        path.write_bytes(Path(DEJAVU).read_bytes())
+    monkeypatch.setattr(card, "FONT_CANDIDATES", (DEJAVU,))
+    assert card._font_path(tmp_path) == str(regular)
+    heading = card._font(str(regular), card.SECTION_SIZE, bold=True)
+    assert Path(heading.path) == medium
+    assert card.render_card(
+        "Title", "Source", [("Skill", "Damage 20%")], font_dir=tmp_path
+    ).startswith(b"\x89PNG")
+
+
+def test_broken_optional_fonts_fall_back_to_usable_files(
+    font_file, tmp_path, monkeypatch
+):
+    regular = tmp_path / "MiSans-Regular.ttf"
+    regular.write_bytes(b"not a font")
+    monkeypatch.setattr(card, "FONT_CANDIDATES", (DEJAVU,))
+    assert card._font_path(tmp_path) == DEJAVU
+    regular.write_bytes(Path(DEJAVU).read_bytes())
+    assert card._font_path(tmp_path) == str(regular)
+    (tmp_path / "MiSans-Medium.ttf").write_bytes(b"broken weight")
+    assert Path(card._font(str(regular), 24, bold=True).path) == regular
+
+
+def test_absent_local_and_system_fonts_skip_without_creating_directories(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(card, "FONT_CANDIDATES", ())
+    directory = tmp_path / "fonts"
+    assert card.render_card("Title", "Source", [], font_dir=directory) is None
+    assert not directory.exists()
+
+
+def test_reload_invalidates_replaced_font_objects(latin_font, tmp_path):
+    alternative = Path("/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf")
+    if not alternative.exists():
+        pytest.skip("no second font for replacement check")
+    regular = tmp_path / "MiSans-Regular.ttf"
+    regular.write_bytes(Path(DEJAVU).read_bytes())
+    previous = card._font(str(regular), 24).getname()
+    regular.write_bytes(alternative.read_bytes())
+    card.clear_font_cache()
+    assert card._font(str(regular), 24).getname() != previous

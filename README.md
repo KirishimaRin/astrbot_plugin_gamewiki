@@ -157,6 +157,20 @@ MediaWiki 页面共用清洗与证据选择规则；AKEData 直接关联结构�
 
 内置昵称包括草神、小草神、小吉祥草王、帝君、岩王爷、风神、雷神、水龙王、芙芙和胡堂主。涉及人物身份或剧情消歧时，建议使用正式名称。
 
+## 卡片字体
+
+插件优先读取自身数据目录下的 MiSans，不需要将字体安装到操作系统。从 [MiSans 官网](https://hyperos.mi.com/font/zh/download/) 下载静态字体，将下列文件放入字体目录后，在 AstrBot WebUI 重载插件：
+
+```text
+data/plugin_data/gamewiki/fonts/
+├── MiSans-Regular.ttf
+└── MiSans-Medium.ttf
+```
+
+也支持同名 `.otf` 文件。正文使用 Regular，标题优先 Medium，其次 Bold，缺少标题字重时沿用 Regular。管理员执行 `/ys doctor` 可以查看实际数据目录、字体目录、当前字体与字重。从旧版升级并沿用 `genshinimpactsearch` 数据目录的安装，将字体放到诊断输出的目录下。
+
+Docker 部署时，将字体放入已挂载的 AstrBot data 目录；与缓存同目录持久保存。字体放在插件目录之外，插件更新时继续保留。未放入 MiSans 或字体损坏时自动尝试系统字体；没有可用中文字体时跳过卡片，文字回复照常发送。更换同路径字体文件后重载插件即可刷新字体缓存。
+
 ## 数据与性能
 
 SQLite 缓存位于 AstrBot 的 `data/plugin_data/gamewiki/wiki-cache.sqlite3`（从旧版本升级时自动沿用旧 `genshinimpactsearch` 目录），最多 128 条记录、总容量 64 MiB（超出按最近使用淘汰）。内存最多保留 8 个已解析页面。插件更新后持久化缓存继续保留。
