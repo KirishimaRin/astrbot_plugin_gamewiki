@@ -23,6 +23,18 @@ def test_zero_score_question_falls_back_to_best_section():
     assert not truncated
 
 
+def test_duplicate_section_titles_are_only_evidence_once():
+    # BWIKI templates emit some headings twice; repeats must not burn budget.
+    sections = _page(
+        ("技能", "<p>技能等级说明一。</p>"),
+        ("技能", "<p>技能等级说明二。</p>"),
+        ("故事", "<p>身世。</p>"),
+    )
+    snippets, _, _ = evidence(sections, "技能", 4000)
+    titles = [item["section"] for item in snippets]
+    assert titles.count("技能") == 1
+
+
 def test_focused_mode_keeps_budget_signal_clean():
     sections = _page(
         ("突破", "<p>突破材料列表。</p>"),

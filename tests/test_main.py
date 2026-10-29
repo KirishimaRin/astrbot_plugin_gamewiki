@@ -743,10 +743,12 @@ def test_evidence_card_is_rendered_locally_and_sent(plugin):
     instance, Event, module = plugin
     event = Event("")
     event.image_result = lambda path: ("image", path)
+    accent = (196, 148, 38)
 
-    def fake_render(title, source, sections):
+    def fake_render(title, source, sections, accent_arg=()):
         assert title == "汤汤" and source == "终末地 AKEData"
         assert sections == [("战技", "伤害 320%")]
+        assert accent_arg == accent
         return b"\x89PNG-fake"
 
     with patch.object(module, "render_card", fake_render):
@@ -758,9 +760,51 @@ def test_evidence_card_is_rendered_locally_and_sent(plugin):
                     "source": "终末地 AKEData",
                     "sections": [("战技", "伤害 320%")],
                 },
+                accent,
             )
         )
     assert event.sent == [("image", str(event.sent[0][1]))]
+
+
+def test_evidence_card_carries_the_game_accent(plugin):
+    from wiki.games import PROFILES
+
+    instance, Event, module = plugin
+    service = instance.services["ys"]
+    service.search = AsyncMock(return_value=_wiki_page())
+    provider = AsyncMock(return_value="configured-provider")
+    instance.context = SimpleNamespace(
+        get_current_chat_provider_id=provider,
+        llm_generate=AsyncMock(
+            return_value=SimpleNamespace(completion_text="需要劫波莲。")
+        ),
+    )
+    event = Event("ys 纳西妲 突破")
+    event.image_result = lambda path: ("image", path)
+    captured = {}
+
+    def fake_render(title, source, sections, accent=()):
+        captured["accent"] = accent
+        return b"\x89PNG-fake"
+
+    with patch.object(module, "render_card", fake_render):
+        asyncio.run(_collect(instance.wiki_command_ys(event)))
+    assert captured["accent"] == PROFILES["ys"].accent
+    assert len(event.sent) == 2 and event.sent[1][0] == "image"
+
+
+def test_evidence_card_is_skipped_when_the_reply_falls_back_to_excerpt(plugin):
+    instance, Event, module = plugin
+    service = instance.services["ys"]
+    service.search = AsyncMock(return_value=_wiki_page())
+    # object() context makes every model call fail, forcing the excerpt path.
+    event = Event("ys 纳西妲突破")
+    event.image_result = lambda path: ("image", path)
+
+    with patch.object(module, "render_card") as render:
+        asyncio.run(_collect(instance.wiki_command_ys(event)))
+    render.assert_not_called()
+    assert len(event.sent) == 1 and "劫波莲" in event.sent[0]
 
 
 def test_evidence_card_without_font_or_on_error_sends_nothing(plugin):

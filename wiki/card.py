@@ -1,4 +1,4 @@
-"""Render the selected evidence as a plain text card image.
+"""Render the selected evidence as a card image with a per-game accent.
 
 The card is drawn from evidence the pipeline already cleaned and bounded; no
 upstream page is rendered and no browser is involved. Hosts without a usable
@@ -32,10 +32,17 @@ SECTION_GAP = 18
 MAX_SECTIONS = 6
 MAX_LINES_PER_SECTION = 16
 
+BORDER = 2
+TICK_WIDTH = 4
+TEXT_OFFSET = 12
+BAND_PAD = 13
+
 INK = (31, 35, 40)
 MUTED = (101, 109, 118)
 FAINT = (163, 170, 180)
 RULE = (208, 215, 222)
+ZEBRA = (246, 248, 251)
+NEUTRAL = (96, 111, 131)
 
 # Latin words stay whole; everything else may break between characters.
 TOKEN = re.compile(r"[!-~]+|\s+|.")
@@ -78,15 +85,19 @@ def wrap(text: str, font, max_width: int) -> list[str]:
     return lines or [""]
 
 
-def render_card(title: str, source: str, sections: list[tuple[str, str]]):
+def render_card(
+    title: str, source: str, sections: list[tuple[str, str]], accent: tuple = ()
+):
     """Return PNG bytes, or None when the host has no usable font."""
     path = _font_path()
     if path is None:
         return None
+    accent = tuple(accent) if accent else NEUTRAL
     title_font = _font(path, TITLE_SIZE)
     section_font = _font(path, SECTION_SIZE)
     body_font = _font(path, BODY_SIZE)
-    body_width = WIDTH - MARGIN * 2
+    text_x = MARGIN + TEXT_OFFSET
+    body_width = WIDTH - text_x - MARGIN
 
     def line_height(font):
         ascent, descent = font.getmetrics()
@@ -95,6 +106,12 @@ def render_card(title: str, source: str, sections: list[tuple[str, str]]):
     section_height = line_height(section_font) - LINE_GAP
     body_height = line_height(body_font)
 
+    label = title.strip()
+    if label and title_font.getlength(label) > WIDTH - MARGIN * 2:
+        while label and title_font.getlength(label + "…") > WIDTH - MARGIN * 2:
+            label = label[:-1]
+        label += "…"
+
     blocks = []
     for name, text in sections[:MAX_SECTIONS]:
         lines = wrap(text, body_font, body_width)
@@ -102,56 +119,77 @@ def render_card(title: str, source: str, sections: list[tuple[str, str]]):
             # Long lore sections bow out; the text reply carries the rest.
             lines = [*lines[: MAX_LINES_PER_SECTION - 1], "……"]
         blocks.append((name, lines))
+
+    def block_height(name, lines):
+        return (section_height + 6 if name else 0) + body_height * len(lines)
+
+    band_height = TITLE_SIZE + BAND_PAD * 2
     content_height = 0
     for index, (name, lines) in enumerate(blocks):
         if index:
             content_height += SECTION_GAP
-        if name:
-            content_height += section_height + 6
-        content_height += body_height * len(lines)
+        content_height += block_height(name, lines)
     footer_space = MARGIN + BODY_SIZE if source else 0
-    height = min(
-        MARGIN + TITLE_SIZE + 10 + MARGIN + content_height + footer_space + MARGIN,
-        MAX_HEIGHT,
+    natural = (
+        BORDER + band_height + MARGIN + content_height + footer_space + MARGIN + BORDER
     )
-    truncated = height == MAX_HEIGHT and (
-        MARGIN + TITLE_SIZE + 10 + MARGIN + content_height + footer_space + MARGIN
-        > MAX_HEIGHT
-    )
+    height = min(natural, MAX_HEIGHT)
+    truncated = natural > height or len(sections) > MAX_SECTIONS
 
     image = Image.new("RGB", (WIDTH, height), "white")
     draw = ImageDraw.Draw(image)
-    draw.rectangle([0, 0, WIDTH - 1, height - 1], outline=RULE, width=2)
+    draw.rectangle([0, 0, WIDTH - 1, height - 1], outline=RULE, width=BORDER)
+    # The accent band carries the game identity; the body stays light for chat
+    # compression legibility.
+    draw.rectangle(
+        [BORDER, BORDER, WIDTH - 1 - BORDER, BORDER + band_height], fill=accent
+    )
+    draw.text((MARGIN, BORDER + BAND_PAD), label, font=title_font, fill="white")
 
-    y = MARGIN
-    draw.text((MARGIN, y), title, font=title_font, fill=INK)
-    y += TITLE_SIZE + 10
-    draw.line([MARGIN, y, WIDTH - MARGIN, y], fill=RULE, width=1)
-    y += MARGIN
-
-    stop = height - footer_space
+    y = BORDER + band_height + MARGIN
+    stop = height - footer_space - BORDER
+    content_stop = stop - body_height if truncated else stop
     for index, (name, lines) in enumerate(blocks):
-        if y + body_height > stop:
-            truncated = True
-            break
         if index:
             y += SECTION_GAP
+        heading_height = section_height + 6 if name else 0
+        available_lines = max(0, (content_stop - y - heading_height) // body_height)
+        fits = lines[:available_lines]
+        if not fits:
+            truncated = True
+            break
+        if len(fits) < len(lines):
+            truncated = True
+        drawn = block_height(name, fits)
+        if index % 2:
+            draw.rectangle(
+                [
+                    BORDER,
+                    y - 4,
+                    WIDTH - 1 - BORDER,
+                    min(y + drawn + 4, stop + 4),
+                ],
+                fill=ZEBRA,
+            )
         if name:
-            draw.text((MARGIN, y), name, font=section_font, fill=MUTED)
+            draw.rectangle(
+                [MARGIN, y + 2, MARGIN + TICK_WIDTH, y + section_height], fill=accent
+            )
+            draw.text((text_x, y), name, font=section_font, fill=INK)
             y += section_height + 6
-        for line in lines:
-            draw.text((MARGIN, y), line, font=body_font, fill=INK)
+        for line in fits:
+            draw.text((text_x, y), line, font=body_font, fill=INK)
             y += body_height
+        if len(fits) < len(lines):
+            break
 
     if truncated:
-        draw.text(
-            (MARGIN, max(y, stop - body_height)), "……", font=body_font, fill=FAINT
-        )
+        draw.text((text_x, stop - body_height), "……", font=body_font, fill=FAINT)
     if source:
-        label = source if len(source) <= 30 else source[:29] + "…"
+        tag = source if len(source) <= 30 else source[:29] + "…"
         draw.text(
-            (WIDTH - MARGIN - body_font.getlength(label), height - MARGIN - BODY_SIZE),
-            label,
+            (WIDTH - MARGIN - body_font.getlength(tag), height - MARGIN - BODY_SIZE),
+            tag,
             font=body_font,
             fill=FAINT,
         )

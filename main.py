@@ -489,15 +489,21 @@ class GameWiki(Star):
         if self.image_reply and image_url:
             await self._send_entry_image(event, image_url)
         card = metrics.get("card") if isinstance(metrics, dict) else None
-        if self.image_reply and card:
-            await self._send_card(event, card)
+        # The excerpt fallback already quotes the evidence verbatim; a card of
+        # the same text would be a pure duplicate.
+        if self.image_reply and card and not metrics.get("fallback"):
+            await self._send_card(event, card, profile.accent)
 
-    async def _send_card(self, event: AstrMessageEvent, card: dict):
+    async def _send_card(self, event: AstrMessageEvent, card: dict, accent: tuple = ()):
         # Rendered locally from validated evidence; no font means no card.
         try:
             async with self._image_slots:
                 png = await asyncio.to_thread(
-                    render_card, card["title"], card["source"], card["sections"]
+                    render_card,
+                    card["title"],
+                    card["source"],
+                    card["sections"],
+                    accent,
                 )
                 if not png:
                     return

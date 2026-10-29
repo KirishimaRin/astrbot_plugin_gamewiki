@@ -177,3 +177,92 @@ def test_zmd_specific_material_question_still_routes_to_materials():
         PROFILES["zmd"].specifics,
     )
     assert [item["section"] for item in snippets] == ["培养材料"]
+
+
+def test_sr_generic_skill_words_reach_the_trace_section():
+    from wiki.selection import evidence
+
+    # BWIKI 星铁页面的「天赋 / …效果加成」分节是星魂/额外能力加成，
+    # 技能数值本体只在「行迹」。
+    sections = [
+        Section("概览", "intro", ["角色概览。"]),
+        Section(
+            "行迹",
+            "trace",
+            ["自破碎的天空坠落，造成火属性伤害 120%。"],
+        ),
+        Section("星魂", "eidolon", ["星魂效果。"]),
+        Section(
+            "天赋 / 固有天赋 / α模组-偏时迸发 效果加成 [额外能力1]",
+            "extra1",
+            ["额外能力效果加成。"],
+        ),
+        Section("角色晋阶材料", "mat1", ["思绪末屑 ×5"]),
+        Section("技能晋阶材料", "mat2", ["步离犬牙 ×3"]),
+    ]
+    for question in ("流萤技能", "流萤战技", "流萤天赋", "流萤行迹", "流萤终结技"):
+        snippets, _, selection = evidence(
+            sections,
+            question,
+            3000,
+            "",
+            "流萤",
+            PROFILES["sr"].intents,
+            PROFILES["sr"].specifics,
+        )
+        assert [item["section"] for item in snippets] == ["行迹"], question
+        assert selection["mode"] != "fallback", question
+
+
+def test_sr_material_questions_still_route_to_material_sections():
+    from wiki.selection import evidence
+
+    sections = [
+        Section("行迹", "trace", ["战技倍率。"]),
+        Section("角色晋阶材料", "mat1", ["思绪末屑 ×5"]),
+        Section("技能晋阶材料", "mat2", ["步离犬牙 ×3"]),
+    ]
+    for question, expected in (
+        ("流萤突破材料", "角色晋阶材料"),
+        ("流萤技能材料", "技能晋阶材料"),
+        ("流萤技能升级", "技能晋阶材料"),
+    ):
+        snippets, _, _ = evidence(
+            sections,
+            question,
+            3000,
+            "",
+            "流萤",
+            PROFILES["sr"].intents,
+            PROFILES["sr"].specifics,
+        )
+        assert expected in [item["section"] for item in snippets], question
+
+
+def test_ark_story_question_reaches_the_archive_section():
+    from wiki.selection import evidence
+
+    # PRTS 干员页没有「角色故事」分节；「干员模组」只承载模块剧情。
+    sections = [
+        Section("概览", "intro", ["干员概览。"]),
+        Section("干员模组", "mod", ["模组故事：某段剧情。"]),
+        Section("人员档案", "archive", ["基础档案与故事正文。"]),
+        Section("技能", "skill", ["技能说明。"]),
+    ]
+    for question in ("能天使故事", "能天使背景", "能天使档案"):
+        snippets, _, _ = evidence(
+            sections,
+            question,
+            3000,
+            "",
+            "能天使",
+            PROFILES["arknights"].intents,
+            PROFILES["arknights"].specifics,
+        )
+        assert [item["section"] for item in snippets] == ["人员档案"], question
+
+
+def test_every_game_profile_declares_a_card_accent():
+    for profile in PROFILES.values():
+        assert len(profile.accent) == 3, profile.code
+        assert all(0 <= channel <= 255 for channel in profile.accent), profile.code

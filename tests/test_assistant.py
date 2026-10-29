@@ -296,14 +296,14 @@ class TestImageGating(unittest.IsolatedAsyncioTestCase):
     async def test_name_and_identity_queries_attach_the_portrait(self):
         for text in ("纳西妲", "纳西妲 简介", "纳西妲是谁"):
             service = Service(self.image_page())
-            _, metrics = await CommandAssistant(AsyncMock()).answer(
+            _, metrics = await CommandAssistant(AsyncMock(return_value="{}")).answer(
                 text, PROFILES["ys"], service
             )
             assert metrics["image_url"] == "https://example.org/p.png", text
 
     async def test_aspect_questions_get_an_evidence_card_not_the_portrait(self):
         for text in ("纳西妲 突破材料", "纳西妲武器图鉴"):
-            _, metrics = await CommandAssistant(AsyncMock()).answer(
+            _, metrics = await CommandAssistant(AsyncMock(return_value="{}")).answer(
                 text, PROFILES["ys"], Service(self.image_page())
             )
             assert "image_url" not in metrics, text

@@ -128,6 +128,15 @@ def evidence(
         "",
     )
     candidates = [s for s in sections if not section or section in s.title]
+    # Page templates can emit one heading twice (BWIKI repeats 行迹/技能晋阶
+    # 材料 blocks); the first copy is authoritative and repeats only burn the
+    # evidence budget and the card layout.
+    seen_titles = set()
+    candidates = [
+        s
+        for s in candidates
+        if s.title not in seen_titles and not seen_titles.add(s.title)
+    ]
 
     def meta(mode, used_sections, omitted=0):
         return {
@@ -167,6 +176,8 @@ def evidence(
         heading_score = max(
             (100 - i for i, h in enumerate(headings) if h in item.title), default=0
         )
+        if specific and specific in item.title:
+            heading_score = max(heading_score, 100)
         return (
             heading_score
             + 3 * len(wanted & terms(item.title))
