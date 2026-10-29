@@ -12,6 +12,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+from .layout import layout_blocks
+
 FONT_CANDIDATES = (
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
     "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
@@ -24,22 +26,16 @@ FONT_CANDIDATES = (
 WIDTH = 640
 MARGIN = 28
 MAX_HEIGHT = 1800
-TITLE_SIZE = 30
-SECTION_SIZE = 20
-BODY_SIZE = 22
-LINE_GAP = 8
-SECTION_GAP = 18
+TITLE_SIZE = 32
+SECTION_SIZE = 25
+BODY_SIZE = 24
 MAX_SECTIONS = 6
-MAX_LINES_PER_SECTION = 16
 
-BORDER = 2
 TICK_WIDTH = 4
 TEXT_OFFSET = 12
-BAND_PAD = 13
 
 INK = (31, 35, 40)
 MUTED = (101, 109, 118)
-FAINT = (163, 170, 180)
 RULE = (208, 215, 222)
 ZEBRA = (246, 248, 251)
 NEUTRAL = (96, 111, 131)
@@ -85,10 +81,69 @@ def wrap(text: str, font, max_width: int) -> list[str]:
     return lines or [""]
 
 
+def _table_sections(name, text):
+    """Split embedded skill tables using their existing labels and descriptions."""
+    lines = text.splitlines()
+    groups, start = [], 0
+    for i, line in enumerate(lines):
+        cells = [c.strip() for c in line.split("|")]
+        if len(cells) < 2 or not all(re.fullmatch(r"LV\d+", c) for c in cells[1:]):
+            continue
+        # BWIKI emits the named skill label immediately before its level table.
+        previous = lines[i - 1].strip() if i else ""
+        labelled = re.match(
+            r"^(?:强化)?(?:普攻|战技|终结技|秘技|天赋)\s*[-—]\s*\S", previous
+        )
+        label = previous if labelled else name
+        prose = [
+            v
+            for v in lines[start : i - 1 if labelled else i]
+            if re.search(r"[。！？]", v)
+        ]
+        rows, end = [], i + 1
+        while end < len(lines) and "|" in lines[end]:
+            row = [c.strip() for c in lines[end].split("|")]
+            if len(row) == len(cells):
+                value = f"{cells[1]} {row[1]}"
+                if len(cells) > 2:
+                    value += f"  /  {cells[-1]} {row[-1]}"
+                rows.append((row[0], value))
+            end += 1
+        if rows:
+            groups.append((label, "\n".join(prose), rows))
+        start = end
+    return groups or [(name, text, [])]
+
+
+def _content(text, table_rows):
+    """Select literal excerpts; no generated summaries or inferred values."""
+    descriptions, facts = [], list(table_rows)
+    text = "\n".join(layout_blocks(text)) if "|" in text else text
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or "其余" in line and "等级略" in line:
+            continue
+        level = re.match(r"^(等级\d+)\s*[：:]\s*(.+)", line)
+        if level:
+            # Keep complete fields, including units and conditions, with a level.
+            fields = re.split(r"[；;]\s*", level[2])
+            facts.append((level[1], fields[0]))
+        else:
+            line = re.sub(r"^技能描述（等级\d+）\s*[：:]\s*", "", line)
+            descriptions.append(line)
+    # Use the first complete sentence when possible; subsequent prose stays in
+    # the text reply/source. Never splice two unrelated clauses into a summary.
+    prose = "\n".join(descriptions)
+    first = re.match(r".*?[。！？]", prose, re.S)
+    if first:
+        prose = first[0]
+    return prose, facts[:2]
+
+
 def render_card(
     title: str, source: str, sections: list[tuple[str, str]], accent: tuple = ()
 ):
-    """Return PNG bytes, or None when the host has no usable font."""
+    """Return a compact excerpt card, or None without a usable CJK font."""
     path = _font_path()
     if path is None:
         return None
@@ -96,102 +151,112 @@ def render_card(
     title_font = _font(path, TITLE_SIZE)
     section_font = _font(path, SECTION_SIZE)
     body_font = _font(path, BODY_SIZE)
+    small_font = _font(path, 18)
     text_x = MARGIN + TEXT_OFFSET
-    body_width = WIDTH - text_x - MARGIN
+    body_width = WIDTH - text_x * 2
+    line_height = 39
 
-    def line_height(font):
-        ascent, descent = font.getmetrics()
-        return ascent + descent + LINE_GAP
+    def bounded(text, font, width, count):
+        lines = wrap(text, font, width)
+        if len(lines) <= count:
+            return lines
+        lines = lines[:count]
+        last = lines[-1].rstrip("，；、 ")
+        while last and font.getlength(last + "…") > width:
+            last = last[:-1]
+        lines[-1] = last + "…"
+        return lines
 
-    section_height = line_height(section_font) - LINE_GAP
-    body_height = line_height(body_font)
-
-    label = title.strip()
-    if label and title_font.getlength(label) > WIDTH - MARGIN * 2:
-        while label and title_font.getlength(label + "…") > WIDTH - MARGIN * 2:
-            label = label[:-1]
-        label += "…"
-
+    groups = [
+        group
+        for name, text in sections[:MAX_SECTIONS]
+        for group in _table_sections(name, text)
+    ]
+    groups = groups[:MAX_SECTIONS]
+    # Share the height budget across topics, so the first skill cannot consume
+    # all of the space and hide the remaining topics.
+    top = 94
+    budget = (MAX_HEIGHT - top - 74) // max(1, len(groups)) - 18
     blocks = []
-    for name, text in sections[:MAX_SECTIONS]:
-        lines = wrap(text, body_font, body_width)
-        if len(lines) > MAX_LINES_PER_SECTION:
-            # Long lore sections bow out; the text reply carries the rest.
-            lines = [*lines[: MAX_LINES_PER_SECTION - 1], "……"]
-        blocks.append((name, lines))
+    for name, text, table_rows in groups:
+        prose, facts = _content(text, table_rows)
+        heading = (
+            bounded(name.replace(" / ", " · "), section_font, body_width, 2)
+            if name
+            else []
+        )
+        heading_h = len(heading) * 36
+        rows = []
+        used = heading_h + 58
+        # Reserve readable space for two numerical rows before sizing prose.
+        for key, value in facts:
+            key_lines = wrap(key, small_font, 146)
+            value_lines = wrap(value, body_font, body_width - 166)
+            # Never cut a numerical field mid-value or remove its unit.
+            if len(key_lines) > 2 or len(value_lines) > 2:
+                continue
+            row_h = max(len(key_lines) * 29, len(value_lines) * 35) + 16
+            if used + row_h + line_height > budget:
+                break
+            rows.append((key_lines, value_lines, row_h))
+            used += row_h
+        count = max(1, min(4, (budget - used) // line_height))
+        lines = bounded(prose, body_font, body_width, count) if prose else []
+        block_h = (
+            16
+            + heading_h
+            + (12 if heading else 0)
+            + len(lines) * line_height
+            + (12 if rows else 0)
+            + sum(r[2] for r in rows)
+            + 18
+        )
+        blocks.append((heading, lines, rows, block_h))
 
-    def block_height(name, lines):
-        return (section_height + 6 if name else 0) + body_height * len(lines)
-
-    band_height = TITLE_SIZE + BAND_PAD * 2
-    content_height = 0
-    for index, (name, lines) in enumerate(blocks):
-        if index:
-            content_height += SECTION_GAP
-        content_height += block_height(name, lines)
-    footer_space = MARGIN + BODY_SIZE if source else 0
-    natural = (
-        BORDER + band_height + MARGIN + content_height + footer_space + MARGIN + BORDER
-    )
-    height = min(natural, MAX_HEIGHT)
-    truncated = natural > height or len(sections) > MAX_SECTIONS
-
+    band_height = 12
+    height = min(MAX_HEIGHT, top + sum(b[3] for b in blocks) + 18 * len(blocks) + 74)
     image = Image.new("RGB", (WIDTH, height), "white")
     draw = ImageDraw.Draw(image)
-    draw.rectangle([0, 0, WIDTH - 1, height - 1], outline=RULE, width=BORDER)
-    # The accent band carries the game identity; the body stays light for chat
-    # compression legibility.
-    draw.rectangle(
-        [BORDER, BORDER, WIDTH - 1 - BORDER, BORDER + band_height], fill=accent
-    )
-    draw.text((MARGIN, BORDER + BAND_PAD), label, font=title_font, fill="white")
-
-    y = BORDER + band_height + MARGIN
-    stop = height - footer_space - BORDER
-    content_stop = stop - body_height if truncated else stop
-    for index, (name, lines) in enumerate(blocks):
-        if index:
-            y += SECTION_GAP
-        heading_height = section_height + 6 if name else 0
-        available_lines = max(0, (content_stop - y - heading_height) // body_height)
-        fits = lines[:available_lines]
-        if not fits:
-            truncated = True
-            break
-        if len(fits) < len(lines):
-            truncated = True
-        drawn = block_height(name, fits)
+    draw.rectangle([0, 0, WIDTH - 1, band_height], fill=accent)
+    label = bounded(title.strip(), title_font, WIDTH - MARGIN * 2, 1)[0]
+    draw.text((MARGIN, 29), label, font=title_font, fill=INK)
+    y = top
+    for index, (heading, lines, rows, block_h) in enumerate(blocks):
         if index % 2:
-            draw.rectangle(
-                [
-                    BORDER,
-                    y - 4,
-                    WIDTH - 1 - BORDER,
-                    min(y + drawn + 4, stop + 4),
-                ],
-                fill=ZEBRA,
+            draw.rounded_rectangle(
+                [MARGIN - 8, y, WIDTH - MARGIN + 8, y + block_h], radius=12, fill=ZEBRA
             )
-        if name:
-            draw.rectangle(
-                [MARGIN, y + 2, MARGIN + TICK_WIDTH, y + section_height], fill=accent
-            )
-            draw.text((text_x, y), name, font=section_font, fill=INK)
-            y += section_height + 6
-        for line in fits:
+        y += 16
+        if heading:
+            draw.rectangle([MARGIN, y + 5, MARGIN + TICK_WIDTH, y + 28], fill=accent)
+            for line in heading:
+                draw.text((text_x, y), line, font=section_font, fill=INK)
+                y += 36
+            y += 12
+        for line in lines:
             draw.text((text_x, y), line, font=body_font, fill=INK)
-            y += body_height
-        if len(fits) < len(lines):
-            break
-
-    if truncated:
-        draw.text((text_x, stop - body_height), "……", font=body_font, fill=FAINT)
+            y += line_height
+        if rows:
+            y += 12
+        for keys, values, row_h in rows:
+            draw.line([text_x, y, WIDTH - text_x, y], fill=RULE)
+            for i, line in enumerate(keys):
+                draw.text((text_x, y + 9 + i * 29), line, font=small_font, fill=MUTED)
+            for i, line in enumerate(values):
+                draw.text(
+                    (text_x + 166, y + 5 + i * 35), line, font=body_font, fill=INK
+                )
+            y += row_h
+        y += 36
+    footer_y = height - 46
+    draw.text((MARGIN, footer_y), "内容节选", font=small_font, fill=MUTED)
     if source:
-        tag = source if len(source) <= 30 else source[:29] + "…"
+        tag = bounded(source, small_font, WIDTH // 2, 1)[0]
         draw.text(
-            (WIDTH - MARGIN - body_font.getlength(tag), height - MARGIN - BODY_SIZE),
+            (WIDTH - MARGIN - small_font.getlength(tag), footer_y),
             tag,
-            font=body_font,
-            fill=FAINT,
+            font=small_font,
+            fill=MUTED,
         )
     output = io.BytesIO()
     image.save(output, format="PNG", optimize=True)

@@ -82,11 +82,11 @@ def test_zebra_striping_keeps_body_text_readable():
 
 
 @pytest.mark.skipif(not _has_cjk_font(), reason="no CJK font on this host")
-def test_long_cards_are_truncated_at_the_height_cap():
+def test_long_cards_share_the_height_budget():
     sections = [(f"分节 {index}", "很长的正文\n" * 20) for index in range(10)]
     png = card.render_card("标题", "来源", sections)
     width, height = Image.open(io.BytesIO(png)).size
-    assert height == card.MAX_HEIGHT
+    assert height <= card.MAX_HEIGHT
 
 
 def test_height_truncation_keeps_text_above_the_source(latin_font, monkeypatch):
@@ -104,11 +104,59 @@ def test_height_truncation_keeps_text_above_the_source(latin_font, monkeypatch):
     height = Image.open(io.BytesIO(png)).height
     source_y = next(xy[1] for xy, text, _ in drawn if text == "Source")
     for xy, text, font in drawn:
-        if text == "Source":
+        if text in {"Source", "内容节选"}:
             continue
         assert xy[1] + font.getmetrics()[0] + font.getmetrics()[1] < source_y
-    assert height == card.MAX_HEIGHT
-    assert any(text == "……" for _, text, _ in drawn)
+    assert height <= card.MAX_HEIGHT
+    assert all(any(text == f"Section {i}" for _, text, _ in drawn) for i in range(6))
+    assert any("…" in text for _, text, _ in drawn)
+
+
+def test_embedded_skill_tables_drop_navigation_and_keep_level_labels():
+    text = (
+        "普攻\n战技\n点击查看技能预览\n造成火属性伤害。\n普攻 - 闪燃推进\n"
+        "详细属性 | LV1 | LV2 | LV10\n单体伤害 | 50% | 60% | 140%\n"
+        "恢复生命。\n战技 - 底火斩击\n详细属性 | LV10\n伤害 | 280%"
+    )
+    groups = card._table_sections("行迹", text)
+    assert groups == [
+        (
+            "普攻 - 闪燃推进",
+            "造成火属性伤害。",
+            [("单体伤害", "LV1 50%  /  LV10 140%")],
+        ),
+        ("战技 - 底火斩击", "恢复生命。", [("伤害", "LV10 280%")]),
+    ]
+
+
+def test_level_excerpts_keep_complete_fields_and_omit_overview_noise():
+    prose, facts = card._content(
+        "技能描述（等级1）：造成伤害。随后恢复生命。\n"
+        "等级1：伤害倍率：20%；总失衡值：15\n"
+        "……（其余22个等级略，可指定等级查询）\n"
+        "等级12：终结技期间伤害倍率：81%；其他属性：18%",
+        [],
+    )
+    assert prose == "造成伤害。"
+    assert facts == [("等级1", "伤害倍率：20%"), ("等级12", "终结技期间伤害倍率：81%")]
+
+
+def test_long_stat_fields_are_omitted_whole(latin_font, monkeypatch):
+    drawn = []
+    original = card.ImageDraw.ImageDraw.text
+
+    def record(draw, xy, text, *args, **kwargs):
+        drawn.append(text)
+        return original(draw, xy, text, *args, **kwargs)
+
+    monkeypatch.setattr(card.ImageDraw.ImageDraw, "text", record)
+    card.render_card(
+        "Title",
+        "Source",
+        [("Skill", "Description.\n等级12：" + "condition " * 80 + "81%")],
+    )
+    assert "等级12" not in drawn
+    assert "内容节选" in drawn
 
 
 def test_empty_sections_render_a_title_only_card(latin_font):
