@@ -57,11 +57,15 @@ class GameWiki(Star):
         self.detailed_chars = int(number("reply_question_chars", 750, 300, 2000))
         self.model_timeout = number("model_timeout_seconds", 20, 2, 60)
         self.overview_chars = int(number("overview_chars", 250, 150, 500))
-        directory = Path(get_astrbot_data_path()) / "plugin_data" / "gamewiki"
-        legacy = Path(get_astrbot_data_path()) / "plugin_data" / "genshinimpactsearch"
-        if not directory.exists() and legacy.exists():
-            # An upgraded install keeps its cache and session switches.
-            directory = legacy
+        data_root = Path(get_astrbot_data_path()) / "plugin_data"
+        directory = data_root / "astrbot_plugin_gamewiki"
+        if not directory.exists():
+            # Preserve caches, session switches and font overrides on upgrades.
+            for old_name in ("gamewiki", "genshinimpactsearch"):
+                legacy = data_root / old_name
+                if legacy.is_dir():
+                    directory = legacy
+                    break
         self.data_dir = directory
         clear_font_cache()
         configured_games = config.get("games", list(PROFILES))

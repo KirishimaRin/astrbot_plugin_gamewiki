@@ -54,7 +54,7 @@ python scripts/audit_categories.py
 
 smoke 脚本只读访问原神 BWIKI；跨游戏 audit 读取明日方舟 PRTS 和其余游戏 BWIKI，尚不覆盖 AKEData 主源。测试昵称、突破总量、指定技能等级、书籍、七圣召唤和不存在词。输出存入本地 `research/live-smoke.json`，该目录不提交到 Git。断言是结构性的：检查正确形状的行/分节存在（如 `点按伤害 | 百分比`），不校验具体数值；BWIKI 编辑者正常调整数值不会误报，站点结构或模板变化才会使断言失败。确因站点改版需要更新时，修改 `scripts/smoke.py` 的 `PATTERNS` 与 `scripts/audit_categories.py` 的 `CASES`，并先在真实页面确认。
 
-CI 另含两个自动任务：`drift`（每周定时与手动触发）在云端连接上述 PRTS/BWIKI 来源运行两个脚本，站点改版当周即标红；`framework` 自动下载固定版本 AstrBot wheel 执行契约检查，无需手工准备。`release` 在推送 `v*` 标签且全部矩阵与框架检查通过后打包并创建 GitHub Release。
+CI 另含两个自动任务：`drift`（每周定时与手动触发）在云端连接上述 PRTS/BWIKI 来源运行两个脚本，站点改版当周即标红；`framework` 自动下载 AstrBot 4.5.7 与 4.29.3 wheel 执行契约检查，无需手工准备。`release` 在推送 `v*` 标签且全部矩阵与框架检查通过后打包并创建 GitHub Release。
 
 跨类型脚本覆盖五款游戏、20 个查询的最终回复及工具证据，验证必需信息、无关信息、技术噪声和回复长度，结果保存到 `research/category-audit.json`。BWIKI 的 WAF 会间歇性拦截，脚本对每个用例间隔 3 秒并最多重试两次。HTTP 成功或命中标题只是接口检查，最终输出也必须通过内容断言。
 
@@ -63,9 +63,11 @@ CI 另含两个自动任务：`drift`（每周定时与手动触发）在云端�
 安装完整 AstrBot 环境前，可检查实际框架的装饰器和命令解析：
 
 ```bash
+python -m pip download --no-deps --dest research/framework-check astrbot==4.5.7
 python -m pip download --no-deps --dest research/framework-check astrbot==4.29.3
 python -m pip install --no-deps --target research/framework-check/deps docstring-parser==0.18.0
-python scripts/check_framework.py
+python scripts/check_framework.py --version 4.5.7
+python scripts/check_framework.py --version 4.29.3
 ```
 
 脚本从官方 wheel 提取 `register_llm_tool` 和 `CommandFilter`，外部上下文使用隔离替身。检查四个工具 schema（包括 wiki_read.source）、五个英文命令、全部旧命令失配、完整问题、帮助、英文管理参数和权限、会话白名单、单条完整消息发送、模型调用上限及卸载。完整服务验收使用下节步骤。
@@ -101,11 +103,11 @@ python scripts/check_framework.py
 | 完整元数据与仓库信息 | `metadata.yaml` |
 | 声明额外依赖与配置 | `requirements.txt`、`_conf_schema.json` |
 | 异步网络访问 | 复用 `httpx.AsyncClient` |
-| 持久化数据放 data | `data/plugin_data/gamewiki/`（旧版本数据目录自动兼容） |
+| 持久化数据放 data | `data/plugin_data/astrbot_plugin_gamewiki/`（升级依次沿用 gamewiki、genshinimpactsearch 旧目录；完整名称目录优先） |
 | 错误处理与测试 | WikiError、超时/限流处理、pytest |
 | 提交前 Ruff 格式化 | 本地命令与 CI |
 | 来源与许可说明 | README、LICENSE |
-| 发布 ZIP 小于 16 MB | 打包脚本检查，研究依赖不入库 |
+| 发布 ZIP 小于 16 MB | 按 16,000,000 字节保守检查，研究依赖不入库 |
 
 ### LLM 工具 docstring 契约
 
@@ -127,7 +129,7 @@ python scripts/check_framework.py
 
 版本号收口在 `wiki/__init__.py` 的 `VERSION`；`tests/test_version.py` 断言 `metadata.yaml`、CHANGELOG 最新条目、README 版本行与 `VERSION` 四处一致，漏改一处测试即失败。打包脚本从元数据读取名称和版本。作者及 MIT 首行使用 KirishimaRin，安装包包含当前维护说明。初始版本为 `v0.2.0`，Git 标签使用同一名称；推送标签会触发 CI 的 `release` 任务自动构建 ZIP 并创建 GitHub Release。
 
-运行检查后提交并推送代码和标签。检查脚本固定读取 astrbot-4.29.3-py3-none-any.whl，避免同目录的其他版本被误选。GitHub 仓库与标签用于源码分发；GitHub Release 和 AstrBot Cloud 插件市场是独立发布步骤。
+运行检查后提交并推送代码和标签。检查脚本默认读取 AstrBot 4.29.3 wheel，可用 --version 4.5.7 显式检查最低版本；CI 对两个版本均执行契约检查，避免同目录的其他版本被误选。GitHub 仓库与标签用于源码分发；GitHub Release 和 AstrBot Cloud 插件市场是独立发布步骤。
 
 发布保留 `v0.x.x` 版本标签，最新正式 Release 标为 `Latest`，此前 Release 保留为历史版本；不创建滚动的 `latest` 或 `other` Git 标签。正常的新版本发布由 CI 显式传入 `--latest`。如需补发历史版本，应另行使用 `--latest=false`，避免替换最新版本标记。
 

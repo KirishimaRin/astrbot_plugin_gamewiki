@@ -50,12 +50,14 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: python -m pip install -c requirements-constraints.txt -r requirements-dev.txt docstring-parser
-      - name: Download the pinned AstrBot wheel
+      - name: Download the minimum and reference AstrBot wheels
         run: |
+          pip download astrbot==4.5.7 --no-deps -d research/framework-check
           pip download astrbot==4.29.3 --no-deps -d research/framework-check
       - name: Resolve plugin requirements with protected core versions
         run: python scripts/check_dependencies.py
-      - run: python scripts/check_framework.py
+      - run: python scripts/check_framework.py --version 4.5.7
+      - run: python scripts/check_framework.py --version 4.29.3
 
   drift:
     # Live checks against BWIKI catch site redesigns that offline tests cannot.

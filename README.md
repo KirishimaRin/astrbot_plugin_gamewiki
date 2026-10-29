@@ -4,7 +4,7 @@
 
 查询原神、崩坏星穹铁道、绝区零、明日方舟与明日方舟终末地的角色、技能、材料、书籍和任务资料，向聊天模型返回相关正文与来源链接。明日方舟优先使用 PRTS，异常或无结果时回退 BWIKI；终末地优先 AKEData、BWIKI 兜底；原神、星铁和绝区零使用 BWIKI。
 
-当前版本：**v0.2.2**；作者：**KirishimaRin**。初始版本为 v0.2.0。插件标识：`astrbot_plugin_gamewiki`。持续改进计划见 [ROADMAP](docs/ROADMAP.md)。
+当前版本：**v0.2.5**；作者：**KirishimaRin**。初始版本为 v0.2.0。插件标识：`astrbot_plugin_gamewiki`。持续改进计划见 [ROADMAP](docs/ROADMAP.md)。
 
 GitHub 仓库、插件标识与 ZIP 包名统一为 `astrbot_plugin_gamewiki`。
 
@@ -41,7 +41,7 @@ GitHub 仓库、插件标识与 ZIP 包名统一为 `astrbot_plugin_gamewiki`。
 
 命令查询的概览默认约150–250字，材料与数值使用短列表。模型不可用或超时则返回“原文摘录”。AI 工具由当前对话模型组织回答，工具内部不额外调用摘要模型。BWIKI 的 WAF 会间歇性拦截请求（HTTP 567），插件内置重试与缓存。
 
-插件使用统一文本事件和回复接口，平台适配由 AstrBot 提供。已检查 AstrBot 4.29.3 的工具注册及命令过滤代码；完整服务加载、实际模型调用和平台展示在目标环境验收。
+插件使用统一文本事件和回复接口，平台适配由 AstrBot 提供。已检查 AstrBot 4.5.7 与 4.29.3 的工具注册及命令过滤代码；完整服务加载、实际模型调用和平台展示在目标环境验收。
 
 ## 安装
 
@@ -169,7 +169,7 @@ MediaWiki 页面共用清洗与证据选择规则；AKEData 直接关联结构�
 
 ## 数据与性能
 
-SQLite 缓存位于 AstrBot 的 `data/plugin_data/gamewiki/wiki-cache.sqlite3`（从旧版本升级时自动沿用旧 `genshinimpactsearch` 目录），最多 128 条记录、总容量 64 MiB（超出按最近使用淘汰）。内存最多保留 8 个已解析页面。插件更新后持久化缓存继续保留。
+SQLite 缓存位于 AstrBot 的 `data/plugin_data/astrbot_plugin_gamewiki/wiki-cache.sqlite3`（升级时依次兼容 `gamewiki`、`genshinimpactsearch` 旧目录；完整名称目录已存在时优先使用，缓存、会话开关和字体覆盖均沿用所选目录），最多 128 条记录、总容量 64 MiB（超出按最近使用淘汰）。内存最多保留 8 个已解析页面。插件更新后持久化缓存继续保留。
 
 默认每个数据源客户端最多 2 个并发请求，请求启动间隔为 0.3 秒，均可配置。相同请求合并；MediaWiki 空结果最多缓存 60 秒，解压后的响应上限为 2 MiB；AKEData 每张数据表上限为 32 MiB。立绘下载最多 24 MiB，最多同时处理两张。超时或临时 5xx 最多重试两次（共 3 次尝试），403 返回错误，429 按 Retry-After 暂停访问且同一上游主机共享冷却。
 

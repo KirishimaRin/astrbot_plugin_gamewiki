@@ -4,6 +4,7 @@ This isolates actual registration code; it does not boot an AstrBot server.
 Requires research/framework-check/{astrbot-*.whl,deps/docstring_parser}.
 """
 
+import argparse
 import ast
 import asyncio
 import enum
@@ -81,7 +82,10 @@ def check_llm_tool_docstrings():
 async def main():
     docstring_problems = check_llm_tool_docstrings()
     assert not docstring_problems, docstring_problems
-    wheel = ROOT / "research/framework-check/astrbot-4.29.3-py3-none-any.whl"
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--version", choices=("4.5.7", "4.29.3"), default="4.29.3")
+    version = parser.parse_args().version
+    wheel = ROOT / f"research/framework-check/astrbot-{version}-py3-none-any.whl"
     with zipfile.ZipFile(wheel) as archive:
         registration = archive.read(
             "astrbot/core/star/register/star_handler.py"

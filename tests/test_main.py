@@ -272,7 +272,7 @@ def test_public_commands_can_disable_inspect_and_restore_session(plugin, game):
     asyncio.run(check())
 
 
-@pytest.mark.parametrize("layout", ["fresh", "legacy", "new", "both"])
+@pytest.mark.parametrize("layout", ["fresh", "legacy", "new", "both", "canonical"])
 def test_session_switch_survives_reload_for_all_directory_layouts(plugin, layout):
     instance, Event, module = plugin
     root = Path(module.get_astrbot_data_path()) / "plugin_data"
@@ -280,6 +280,9 @@ def test_session_switch_survives_reload_for_all_directory_layouts(plugin, layout
         (root / "genshinimpactsearch").mkdir(parents=True)
     if layout in {"new", "both"}:
         (root / "gamewiki").mkdir(parents=True)
+    if layout == "canonical":
+        for name in ("astrbot_plugin_gamewiki", "gamewiki", "genshinimpactsearch"):
+            (root / name).mkdir(parents=True)
 
     async def check():
         first = type(instance)(object(), {})
@@ -287,11 +290,25 @@ def test_session_switch_survives_reload_for_all_directory_layouts(plugin, layout
         try:
             event = Event("ys session off", admin=True)
             assert [r async for r in first.wiki_command_ys(event)] == []
-            selected = "genshinimpactsearch" if layout == "legacy" else "gamewiki"
+            selected = (
+                "genshinimpactsearch"
+                if layout == "legacy"
+                else "gamewiki"
+                if layout in {"new", "both"}
+                else "astrbot_plugin_gamewiki"
+            )
             assert first.data_dir == root / selected
             assert (first.data_dir / "session-overrides.json").is_file()
+            await first.cache.put("upgrade-check", {"kept": True}, 60)
+            fonts = first.data_dir / "fonts"
+            fonts.mkdir()
+            (fonts / "override.ttf").write_bytes(b"existing-font-override")
             second = type(instance)(object(), {})
             assert not second._allowed(event)
+            assert await second.cache.get("upgrade-check") == {"kept": True}
+            assert (second.data_dir / "fonts" / "override.ttf").read_bytes() == (
+                b"existing-font-override"
+            )
         finally:
             await first.terminate()
             if second:

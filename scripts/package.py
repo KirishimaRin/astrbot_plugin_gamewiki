@@ -52,8 +52,8 @@ def main():
         assert len(archive.namelist()) == len(files)
     print(destination)
     print(f"{len(files)} files, {destination.stat().st_size} bytes")
-    if destination.stat().st_size >= 16 * 1024 * 1024:
-        raise ValueError("Plugin ZIP exceeds AstrBot market's 16 MiB limit")
+    if destination.stat().st_size >= 16_000_000:
+        raise ValueError("Plugin ZIP must be smaller than 16 MB (16,000,000 bytes)")
 
 
 if __name__ == "__main__":
