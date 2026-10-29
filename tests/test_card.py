@@ -244,3 +244,23 @@ def test_material_grid_keeps_later_items_with_their_quantities(latin_font, monke
         ],
     )
     assert "item11 × 12" in drawn
+
+
+@pytest.mark.skipif(
+    not Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc").exists(),
+    reason="no Noto CJK font collection on this host",
+)
+def test_cjk_collection_uses_simplified_chinese_and_real_heading_weight():
+    path = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+    regular = card._font(path, card.BODY_SIZE)
+    heading = card._font(path, card.SECTION_SIZE, bold=True)
+    assert regular.getname() == ("Noto Sans CJK SC", "Regular")
+    assert heading.getname() == ("Noto Sans CJK SC", "Bold")
+
+
+def test_hosts_without_a_bold_sibling_keep_a_usable_font(latin_font, tmp_path):
+    path = tmp_path / "Custom.ttf"
+    path.write_bytes(Path(DEJAVU).read_bytes())
+    heading = card._font(str(path), card.SECTION_SIZE, bold=True)
+    assert heading.getlength("Readable title") > 0
+    assert heading.getname() == card._font(str(path), card.BODY_SIZE).getname()

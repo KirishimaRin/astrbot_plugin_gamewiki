@@ -27,7 +27,7 @@ WIDTH = 640
 MARGIN = 28
 MAX_HEIGHT = 1800
 TITLE_SIZE = 32
-SECTION_SIZE = 25
+SECTION_SIZE = 24
 BODY_SIZE = 24
 MAX_SECTIONS = 6
 
@@ -52,8 +52,39 @@ def _font_path():
 
 
 @lru_cache(maxsize=8)
-def _font(path, size):
-    return ImageFont.truetype(path, size)
+def _face_index(path):
+    # TTC collections often put Japanese first. Select the Simplified Chinese
+    # face by family name rather than assuming every collection has one order.
+    if Path(path).suffix.lower() == ".ttc":
+        for index in range(10):
+            try:
+                family, _ = ImageFont.truetype(path, 12, index=index).getname()
+            except OSError:
+                break
+            if family.endswith(" SC") or "简体" in family:
+                return index
+    return 0
+
+
+def _weight_path(path, bold):
+    if bold:
+        path = str(path)
+        stem = Path(path).stem
+        candidates = (
+            path.replace("-Regular", "-Bold"),
+            str(Path(path).with_name(stem + "-Bold" + Path(path).suffix)),
+            path.replace("msyh.ttc", "msyhbd.ttc"),
+        )
+        for candidate in candidates:
+            if candidate != path and Path(candidate).is_file():
+                return candidate
+    return path
+
+
+@lru_cache(maxsize=16)
+def _font(path, size, bold=False):
+    path = _weight_path(path, bold)
+    return ImageFont.truetype(path, size, index=_face_index(path))
 
 
 def wrap(text: str, font, max_width: int) -> list[str]:
@@ -302,8 +333,8 @@ def render_card(
     if path is None:
         return None
     accent = tuple(accent) if accent else NEUTRAL
-    title_font = _font(path, TITLE_SIZE)
-    section_font = _font(path, SECTION_SIZE)
+    title_font = _font(path, TITLE_SIZE, bold=True)
+    section_font = _font(path, SECTION_SIZE, bold=True)
     body_font = _font(path, BODY_SIZE)
     small_font = _font(path, 18)
     text_x = MARGIN + TEXT_OFFSET
