@@ -219,8 +219,20 @@ class CommandAssistant:
         if result.get("status") == "ok":
             if wants_image(question, result.get("title", "")):
                 metrics["image_url"] = result.get("image_url", "")
-            else:
-                metrics["image_decision"] = "aspect_query"
+            elif (
+                result.get("evidence")
+                and result.get("selection", {}).get("mode") != "fallback"
+                and any(item["section"] != "概览" for item in result["evidence"])
+            ):
+                # Aspect questions get a card of the matched sections instead
+                # of the portrait; the two image kinds stay exclusive.
+                metrics["card"] = {
+                    "title": result.get("display_title") or result["title"],
+                    "source": result.get("source", ""),
+                    "sections": [
+                        (item["section"], item["text"]) for item in result["evidence"]
+                    ],
+                }
         if result["status"] in {"error", "not_found", "needs_choice"}:
             reply = format_command(result)
         elif not result.get("evidence"):

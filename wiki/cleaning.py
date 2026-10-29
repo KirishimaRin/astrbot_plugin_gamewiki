@@ -47,6 +47,37 @@ def entity_name(text: str) -> str:
     ).strip()
 
 
+def prepare_bwiki_operator(soup):
+    """Keep BWIKI's CSS-grid skill levels as tables with real skill boundaries."""
+    index = 0
+    for container in list(soup.select(".switch-tab-content.operator")):
+        grids = container.select(".skill-table-grid")
+        if not grids:
+            continue
+        index += 1
+        table = soup.new_tag("table")
+        for grid in grids:
+            row = soup.new_tag("tr")
+            for cell in grid.find_all("div", recursive=False):
+                target = soup.new_tag(
+                    "th" if "skill-table-header" in grid.get("class", []) else "td"
+                )
+                target.string = cell.get_text("", strip=True)
+                row.append(target)
+            table.append(row)
+            grid.decompose()
+        metadata = container.get_text(" ", strip=True)
+        container.clear()
+        heading = soup.new_tag("h3")
+        heading.string = f"技能{index}"
+        heading.append(soup.new_tag("span", id="技能"))
+        container.append(heading)
+        paragraph = soup.new_tag("p")
+        paragraph.string = metadata
+        container.append(paragraph)
+        container.append(table)
+
+
 def clean_page(
     html: str,
     title: str,
@@ -58,6 +89,8 @@ def clean_page(
     soup = BeautifulSoup(html, "html.parser")
     if source == "prts":
         prepare_prts(soup, title)
+    elif prefix == "arknights":
+        prepare_bwiki_operator(soup)
     for comment in list(soup.find_all(string=lambda v: isinstance(v, Comment))):
         if noise is not None:
             noise["comments"] = noise.get("comments", 0) + 1

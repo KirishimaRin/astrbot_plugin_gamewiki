@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import tempfile
 import time
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
 from .wiki.cache import Cache
 from .wiki.assistant import CommandAssistant
+from .wiki.card import clear_font_cache, font_description, render_card
 from .wiki.client import WikiClient
 from .wiki.conversation import NUMBER, Conversations, is_followup, looks_like_followup
 from .wiki.games import PROFILES, GameProfile, parse_alias_config
@@ -61,6 +63,7 @@ class GameWiki(Star):
             # An upgraded install keeps its cache and session switches.
             directory = legacy
         self.data_dir = directory
+        clear_font_cache()
         configured_games = config.get("games", list(PROFILES))
         if not isinstance(configured_games, list):
             configured_games = list(PROFILES)
@@ -241,11 +244,14 @@ class GameWiki(Star):
 
     async def _doctor_text(self, event: AstrMessageEvent) -> str:
         health = await self.cache.health()
+        font = await asyncio.to_thread(font_description, self.data_dir / "fonts")
         lines = [
             "百科诊断（本地检查，不请求 Wiki，不调用模型生成）",
             f"启用游戏：{', '.join(self.services)}",
             self._session_status(event),
             f"数据目录：{self.data_dir}",
+            f"字体目录：{self.data_dir / 'fonts'}",
+            f"卡片字体：{font}",
             f"缓存读取：{'正常' if health['readable'] else '失败'}；"
             f"目录写入：{'正常' if health['writable'] else '失败'}",
             f"有效缓存：{health['entries']} 条 / {health['bytes']} 字节",
@@ -486,6 +492,32 @@ class GameWiki(Star):
         image_url = metrics.get("image_url") if isinstance(metrics, dict) else ""
         if self.image_reply and image_url:
             await self._send_entry_image(event, image_url)
+        card = metrics.get("card") if isinstance(metrics, dict) else None
+        # The excerpt fallback already quotes the evidence verbatim; a card of
+        # the same text would be a pure duplicate.
+        if self.image_reply and card and not metrics.get("fallback"):
+            await self._send_card(event, card, profile.accent)
+
+    async def _send_card(self, event: AstrMessageEvent, card: dict, accent: tuple = ()):
+        # Rendered locally from validated evidence; no font means no card.
+        try:
+            async with self._image_slots:
+                png = await asyncio.to_thread(
+                    render_card,
+                    card["title"],
+                    card["source"],
+                    card["sections"],
+                    accent,
+                    font_dir=self.data_dir / "fonts",
+                )
+                if not png:
+                    return
+                with tempfile.TemporaryDirectory(prefix="gamewiki-card-") as directory:
+                    path = Path(directory) / "card.png"
+                    path.write_bytes(png)
+                    await event.send(event.image_result(str(path)))
+        except Exception:
+            logger.debug("证据卡片发送失败，忽略", exc_info=True)
 
     async def _send_entry_image(self, event: AstrMessageEvent, image_url: str):
         key = (event.unified_msg_origin, image_url)

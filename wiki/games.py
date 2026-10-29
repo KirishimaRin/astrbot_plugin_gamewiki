@@ -6,6 +6,13 @@ live in cleaning/selection; game terms and source addresses belong here.
 
 from dataclasses import dataclass, field
 
+YS_SPECIFICS = (
+    (("突破材料", "突破"), "突破"),
+    (("战技",), "元素战技"),
+    (("大招", "爆发"), "元素爆发"),
+    (("普攻", "普通攻击", "重击"), "普通攻击"),
+)
+
 
 @dataclass(frozen=True)
 class GameProfile:
@@ -20,6 +27,8 @@ class GameProfile:
     specifics: tuple = ()
     # Search terms that redirect a card-like entry lookup (ys only).
     card_words: tuple = ()
+    # Evidence card accent color (RGB); empty falls back to a neutral gray.
+    accent: tuple = ()
 
 
 YS = GameProfile(
@@ -27,7 +36,9 @@ YS = GameProfile(
     name="原神",
     command="ys",
     intents=(),
+    specifics=YS_SPECIFICS,
     card_words=("七圣", "卡牌", "角色牌"),
+    accent=(64, 145, 108),
 )
 
 SR = GameProfile(
@@ -40,14 +51,28 @@ SR = GameProfile(
             ("角色晋阶材料", "技能晋阶材料", "晋阶材料"),
             (),
         ),
-        (("行迹", "技能", "战技", "终结技", "天赋", "倍率"), ("行迹", "技能"), ()),
     ),
     specifics=(
-        (("技能晋阶", "技能升级"), "技能晋阶材料"),
+        (("技能晋阶", "技能升级", "技能材料"), "技能晋阶材料"),
         (("角色晋阶", "晋阶"), "角色晋阶材料"),
-        (("终结技",), "终结技"),
-        (("普攻", "普通攻击"), "普攻"),
+        # BWIKI 星铁页面的「天赋 / …效果加成」分节是星魂/额外能力加成，
+        # 技能数值本体在「行迹」分节，泛称技能词统一路由过去。
+        (
+            (
+                "技能",
+                "战技",
+                "终结技",
+                "大招",
+                "普攻",
+                "普通攻击",
+                "天赋",
+                "倍率",
+                "行迹",
+            ),
+            "行迹",
+        ),
     ),
+    accent=(126, 88, 242),
 )
 
 ZZZ = GameProfile(
@@ -63,6 +88,7 @@ ZZZ = GameProfile(
         (("技能", "特殊技", "终结技", "倍率"), ("技能",), ()),
     ),
     specifics=((("终结技",), "终结技"),),
+    accent=(240, 124, 44),
 )
 
 ARKNIGHTS = GameProfile(
@@ -85,17 +111,23 @@ ARKNIGHTS = GameProfile(
     specifics=(
         (("专精", "技能升级", "技能材料"), "技能升级材料"),
         (("精英化",), "精英化"),
+        # PRTS uses 干员档案; BWIKI uses 人员档案.
+        (("故事", "身世", "背景", "经历", "剧情", "档案"), "档案"),
+        (("属性", "面板"), "属性"),
         (("技能3", "第三技能", "三技能"), "技能3"),
         (("技能2", "第二技能", "二技能"), "技能2"),
         (("技能1", "第一技能", "一技能"), "技能1"),
     ),
+    accent=(166, 134, 66),
 )
 
 ZMD = GameProfile(
     code="zmd",
     name="明日方舟:终末地",
     command="zmd",
-    intents=(),
+    # AKEData titles skill sections "战技 / 惊霆诀"-style, so the generic
+    # skill words need their own heading row beyond selection.INTENTS.
+    intents=((("技能", "倍率", "伤害"), ("战技", "终结技", "普通攻击", "连携技"), ()),),
     specifics=(
         (("终结技", "大招"), "终结技"),
         (("战技",), "战技"),
@@ -106,6 +138,7 @@ ZMD = GameProfile(
         (("突破", "培养材料", "升级材料", "技能材料"), "培养材料"),
         (("属性", "面板"), "基础属性"),
     ),
+    accent=(196, 148, 38),
 )
 
 # Aspect words shared by every game. The question splitter in assistant.py

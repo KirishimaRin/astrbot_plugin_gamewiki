@@ -296,21 +296,24 @@ class TestImageGating(unittest.IsolatedAsyncioTestCase):
     async def test_name_and_identity_queries_attach_the_portrait(self):
         for text in ("纳西妲", "纳西妲 简介", "纳西妲是谁"):
             service = Service(self.image_page())
-            _, metrics = await CommandAssistant(AsyncMock()).answer(
+            _, metrics = await CommandAssistant(AsyncMock(return_value="{}")).answer(
                 text, PROFILES["ys"], service
             )
             assert metrics["image_url"] == "https://example.org/p.png", text
 
-    async def test_aspect_questions_skip_the_portrait(self):
+    async def test_aspect_questions_get_an_evidence_card_not_the_portrait(self):
         for text in ("纳西妲 突破材料", "纳西妲武器图鉴"):
-            _, metrics = await CommandAssistant(AsyncMock()).answer(
+            _, metrics = await CommandAssistant(AsyncMock(return_value="{}")).answer(
                 text, PROFILES["ys"], Service(self.image_page())
             )
             assert "image_url" not in metrics, text
-            assert metrics["image_decision"] == "aspect_query", text
+            assert metrics["card"]["title"] == "纳西妲", text
+            assert metrics["card"]["sections"] == [
+                ("突破", "劫波莲 × 168\n摩拉 × 420000")
+            ], text
 
     async def test_followup_and_selection_reads_keep_the_original_decision(self):
-        for question, expected in (("突破材料呢", False), ("", True)):
+        for question, portrait in (("突破材料呢", False), ("", True)):
             service = Service()
             service.read = AsyncMock(return_value=self.image_page())
             _, metrics = await CommandAssistant(AsyncMock()).answer(
@@ -320,7 +323,8 @@ class TestImageGating(unittest.IsolatedAsyncioTestCase):
                 page_id=42,
                 question=question,
             )
-            assert ("image_url" in metrics) is expected, question
+            assert ("image_url" in metrics) is portrait, question
+            assert ("card" in metrics) is not portrait, question
 
     async def test_aspect_vocabulary_is_derived_from_game_profiles(self):
         from wiki.assistant import IDENTITY, QUESTION
@@ -334,3 +338,18 @@ class TestImageGating(unittest.IsolatedAsyncioTestCase):
         assert IDENTITY.search("汤汤立绘")
         # Bare names still parse as entities, not questions.
         assert literal_intent("汤汤武器", Service()) is None
+
+
+@pytest.mark.parametrize("mode,section", [("fallback", "故事"), ("focused", "概览")])
+def test_unstructured_or_fallback_evidence_does_not_get_an_aspect_card(mode, section):
+    async def run():
+        result = page()
+        result["evidence"] = [{"section": section, "text": "职业术师，武器手铳。"}]
+        result["selection"] = {"mode": mode}
+        _, metrics = await CommandAssistant(
+            AsyncMock(return_value="请查看原文中的相关资料。")
+        ).answer("纳西妲 技能", PROFILES["ys"], Service(result))
+        assert "card" not in metrics
+        assert "image_url" not in metrics
+
+    asyncio.run(run())

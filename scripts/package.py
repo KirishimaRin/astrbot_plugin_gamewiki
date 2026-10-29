@@ -30,6 +30,17 @@ def main():
     ]
     files += sorted((root / "wiki").glob("*.py"))
     files += sorted((root / "docs").glob("*.md"))
+    # Keep only the two unmodified MiSans weights and their notices. Never
+    # include download archives, alternate formats, or local font overrides.
+    files += [
+        root / "assets" / "fonts" / name
+        for name in (
+            "MiSans-Regular.ttf",
+            "MiSans-Medium.ttf",
+            "MiSans-LICENSE.pdf",
+            "README.md",
+        )
+    ]
     with zipfile.ZipFile(destination, "w", zipfile.ZIP_DEFLATED) as archive:
         for path in files:
             archive.write(
