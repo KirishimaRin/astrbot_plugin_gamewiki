@@ -4,7 +4,7 @@
 
 查询原神、崩坏星穹铁道、绝区零、明日方舟与明日方舟终末地的角色、技能、材料、书籍和任务资料，向聊天模型返回相关正文与来源链接。明日方舟优先使用 PRTS，异常或无结果时回退 BWIKI；终末地优先 AKEData、BWIKI 兜底；原神、星铁和绝区零使用 BWIKI。
 
-当前版本：**v0.2.1**；作者：**KirishimaRin**。初始版本为 v0.2.0。插件标识：`astrbot_plugin_gamewiki`。持续改进计划见 [ROADMAP](docs/ROADMAP.md)。
+当前版本：**v0.2.2**；作者：**KirishimaRin**。初始版本为 v0.2.0。插件标识：`astrbot_plugin_gamewiki`。持续改进计划见 [ROADMAP](docs/ROADMAP.md)。
 
 GitHub 仓库、插件标识与 ZIP 包名统一为 `astrbot_plugin_gamewiki`。
 
