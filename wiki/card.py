@@ -2,7 +2,7 @@
 
 The card is drawn from evidence the pipeline already cleaned and bounded; no
 upstream page is rendered and no browser is involved. Hosts without a usable
-CJK font simply skip the card.
+CJK font simply skip the card. MiSans Regular/Medium ship with the plugin.
 """
 
 import io
@@ -15,6 +15,7 @@ from PIL import Image, ImageDraw, ImageFont
 from .layout import layout_blocks
 
 FONT_CANDIDATES = (
+    str(Path(__file__).resolve().parents[1] / "assets/fonts/MiSans-Regular.ttf"),
     "/usr/local/share/fonts/MiSans-Regular.ttf",
     "/usr/share/fonts/truetype/misans/MiSans-Regular.ttf",
     "C:/Windows/Fonts/MiSans-Regular.ttf",

@@ -320,3 +320,26 @@ def test_reload_invalidates_replaced_font_objects(latin_font, tmp_path):
     regular.write_bytes(alternative.read_bytes())
     card.clear_font_cache()
     assert card._font(str(regular), 24).getname() != previous
+
+
+def test_default_font_is_bundled_misans_with_regular_and_medium(tmp_path):
+    import hashlib
+
+    directory = Path(card.__file__).resolve().parents[1] / "assets" / "fonts"
+    regular = directory / "MiSans-Regular.ttf"
+    medium = directory / "MiSans-Medium.ttf"
+    assert card._font_path(tmp_path / "no-override") == str(regular)
+    assert card._font(str(regular), card.BODY_SIZE).getname() == ("MiSans", "Regular")
+    assert card._font(str(regular), card.SECTION_SIZE, bold=True).getname() == (
+        "MiSans",
+        "Medium",
+    )
+    assert (
+        hashlib.sha256(regular.read_bytes()).hexdigest()
+        == "9c120f0a849bc0aa5048daae2a3c0f6eecd828b5b33fce682a9622833f5feea6"
+    )
+    assert (
+        hashlib.sha256(medium.read_bytes()).hexdigest()
+        == "b03e98374e971594b0b7a9706d0704241f76e1b88556cdda79c5039ef8a638d1"
+    )
+    assert (directory / "MiSans-LICENSE.pdf").read_bytes().startswith(b"%PDF-")

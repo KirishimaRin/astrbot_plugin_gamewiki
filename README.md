@@ -159,17 +159,13 @@ MediaWiki 页面共用清洗与证据选择规则；AKEData 直接关联结构�
 
 ## 卡片字体
 
-插件优先读取自身数据目录下的 MiSans，不需要将字体安装到操作系统。从 [MiSans 官网](https://hyperos.mi.com/font/zh/download/) 下载静态字体，将下列文件放入字体目录后，在 AstrBot WebUI 重载插件：
+插件默认使用内置 **MiSans**：正文 Regular，标题和分节 Medium。安装或更新插件后直接生效，服务器无需安装字体、复制字体文件或联网下载。字体对象和字形索引均在进程内缓存。
 
-```text
-data/plugin_data/gamewiki/fonts/
-├── MiSans-Regular.ttf
-└── MiSans-Medium.ttf
-```
+本软件使用 MiSans 字体，字体版权归小米科技有限责任公司，字体资源按随附的 [MiSans 字体许可协议](assets/fonts/MiSans-LICENSE.pdf) 使用，独立于插件代码的 MIT 许可。官方未修改的字体文件、许可原文及来源说明一起随安装包提供。
 
-也支持同名 `.otf` 文件。正文使用 Regular，标题优先 Medium，其次 Bold，缺少标题字重时沿用 Regular。管理员执行 `/ys doctor` 可以查看实际数据目录、字体目录、当前字体与字重。从旧版升级并沿用 `genshinimpactsearch` 数据目录的安装，将字体放到诊断输出的目录下。
+管理员执行 `/ys doctor` 可查看实际字体、字重和文件路径。若需覆盖内置字体，可将自己的 MiSans Regular/Medium 静态文件放进诊断显示的字体目录 `fonts/`，然后重载插件；支持 `.ttf` 和 `.otf`。旧安装沿用实际数据目录，Docker 覆盖字体放入挂载的 data 目录。
 
-Docker 部署时，将字体放入已挂载的 AstrBot data 目录；与缓存同目录持久保存。字体放在插件目录之外，插件更新时继续保留。未放入 MiSans 或字体损坏时自动尝试系统字体；没有可用中文字体时跳过卡片，文字回复照常发送。更换同路径字体文件后重载插件即可刷新字体缓存。
+优先级为：数据目录 MiSans → 内置 MiSans → 系统字体。只有内置与覆盖字体均不可用时才尝试系统字体；文字回复照常发送。更换同路径字体文件后重载插件会刷新字体缓存。
 
 ## 数据与性能
 
