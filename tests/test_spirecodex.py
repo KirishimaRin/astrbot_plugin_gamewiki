@@ -633,6 +633,38 @@ def make_service(tmp_path, calls=None):
                     ],
                     "most_removed": [{"id": "STRIKE", "name": "Strike", "pct": 51.1}],
                     "reward_skip_rate": 28.5,
+                    "map_danger": [
+                        {
+                            "act": 0,
+                            "types": {
+                                "boss": {"death_rate": 8.56},
+                                "elite": {"death_rate": 4.4},
+                            },
+                        }
+                    ],
+                    "survival": [
+                        {"floor": 1, "alive_pct": 100.0},
+                        {"floor": 10, "alive_pct": 89.7},
+                    ],
+                    "character_behavior": [
+                        {
+                            "id": "ironclad",
+                            "removes_per_run": 3.21,
+                            "rest": {"SMITH": 59.1, "HEAL": 33.3},
+                        }
+                    ],
+                    "hopper_stolen": [{"id": "STRIKE", "name": "Strike", "pct": 1.1}],
+                    "ascension_matrix": {
+                        "ironclad": {
+                            "0": {"win_rate": 24.3},
+                            "10": {"win_rate": 20.9},
+                        }
+                    },
+                    "records": {
+                        "fastest_win": {"run_time": 900, "run_hash": "x"},
+                        "longest_run": {"run_time": 1958760, "run_hash": "y"},
+                        "biggest_deck": {"size": 2224, "run_hash": "z"},
+                    },
                     "data_through": "2026-10-30",
                 },
             )
@@ -1217,3 +1249,30 @@ def test_mixed_language_query_splits_trailing_aspect(tmp_path):
     result = asyncio.run(run())
     assert result["status"] == "ok"
     assert result["title"] == "重击"
+
+
+def test_extra_community_stats_queries(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            records = await service.search("最快通关记录", "")
+            survival = await service.search("第几层存活率", "")
+            mapping = await service.search("地图危险", "")
+            hopper = await service.search("谁最常被偷", "")
+            behavior = await service.search("角色行为", "")
+            matrix = await service.search("进阶矩阵", "")
+            return records, survival, mapping, hopper, behavior, matrix
+        finally:
+            await client.close()
+
+    records, survival, mapping, hopper, behavior, matrix = asyncio.run(run())
+    assert records["status"] == "ok" and "极限记录" in records["available_sections"]
+    assert "15分" in "\n".join(item["text"] for item in records["evidence"])
+    assert survival["status"] == "ok" and "生存曲线" in survival["available_sections"]
+    assert mapping["status"] == "ok" and "地图危险" in mapping["available_sections"]
+    assert "8.56%" in "\n".join(item["text"] for item in mapping["evidence"])
+    assert hopper["status"] == "ok" and "被偷卡牌" in hopper["available_sections"]
+    assert behavior["status"] == "ok" and "角色行为" in behavior["available_sections"]
+    assert matrix["status"] == "ok" and "进阶矩阵" in matrix["available_sections"]
+    assert "A10 20.9%" in "\n".join(item["text"] for item in matrix["evidence"])

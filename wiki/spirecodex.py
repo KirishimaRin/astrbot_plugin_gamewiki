@@ -256,6 +256,22 @@ COMMUNITY_TITLES = {
     "rest": "篝火选择",
     "removed": "最常删除",
     "skip": "奖励跳过率",
+    "map": "地图危险",
+    "survival": "生存曲线",
+    "behavior": "角色行为",
+    "hopper": "被偷卡牌",
+    "matrix": "进阶矩阵",
+    "records": "极限记录",
+}
+ROOM_LABELS = {
+    "treasure": "宝箱",
+    "unknown": "未知",
+    "monster": "普通战斗",
+    "rest_site": "篝火",
+    "ancient": "先古",
+    "elite": "精英",
+    "boss": "Boss",
+    "shop": "商店",
 }
 REST_NAMES = {
     "Smith": "锻造",
@@ -750,6 +766,24 @@ class SpireCodexService:
             return "ancient"
         if any(word in text for word in ("跳过奖励", "跳牌")):
             return "skip"
+        if any(word in text for word in ("地图危险", "危险房间", "死亡房间")):
+            return "map"
+        if any(
+            word in text for word in ("生存曲线", "活到", "第几层", "存活率", "通关率")
+        ):
+            return "survival"
+        if any(
+            word in text for word in ("角色行为", "删牌习惯", "篝火习惯", "平均删牌")
+        ):
+            return "behavior"
+        if any(word in text for word in ("偷牌", "偷窃", "被偷")):
+            return "hopper"
+        if any(word in text for word in ("进阶矩阵", "各角色进阶")):
+            return "matrix"
+        if any(
+            word in text for word in ("最快通关", "最长一局", "最大卡组", "极限记录")
+        ):
+            return "records"
         return ""
 
     @staticmethod
@@ -1068,10 +1102,16 @@ class SpireCodexService:
     @staticmethod
     def _split_kind_prefix(query):
         for word, kind in KIND_WORDS:
-            if query.startswith(word) and len(query) > len(word):
-                rest = query[len(word) :].lstrip(" ·:：,，")
-                if rest:
-                    return rest, kind
+            if not query.startswith(word) or len(query) <= len(word):
+                continue
+            tail = query[len(word) :]
+            # Require a separator: “遗物 燃烧之血” is a type prefix, but
+            # “角色行为”/“遗物效果” are ordinary concept words.
+            if not tail[0].isspace() and tail[0] not in "·:：,，":
+                continue
+            rest = tail.lstrip(" ·:：,，")
+            if rest:
+                return rest, kind
         return query, ""
 
     @staticmethod
@@ -2345,6 +2385,105 @@ class SpireCodexService:
             if rate is not None:
                 add("基本信息", [f"跳过奖励比例：{rate}%"])
                 add("奖励跳过率", [f"跳过奖励比例：{rate}%"])
+        elif metric == "map":
+            lines = []
+            for row in data.get("map_danger") or []:
+                if not isinstance(row, dict):
+                    continue
+                types = row.get("types") or {}
+                parts = [
+                    f"{ROOM_LABELS.get(key, key)} 死亡 {types[key].get('death_rate')}%"
+                    for key in ("monster", "elite", "boss")
+                    if isinstance(types.get(key), dict)
+                    and types[key].get("death_rate") is not None
+                ]
+                if parts:
+                    lines.append(
+                        f"第{int(row.get('act', 0)) + 1}幕：" + "，".join(parts)
+                    )
+            add("基本信息", lines[:3])
+            add("地图危险", lines)
+        elif metric == "survival":
+            rows = data.get("survival") or []
+            wanted = {1, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50}
+            lines = [
+                f"第{item.get('floor')}层：存活 {item.get('alive_pct')}%"
+                for item in rows
+                if isinstance(item, dict) and item.get("floor") in wanted
+            ]
+            add("基本信息", lines[:3])
+            add("生存曲线", lines)
+        elif metric == "behavior":
+            lines = []
+            for row in data.get("character_behavior") or []:
+                if not isinstance(row, dict):
+                    continue
+                name = CHARACTERS.get(str(row.get("id", "")), str(row.get("id", "")))
+                rest = row.get("rest") or {}
+                lines.append(
+                    f"{name}：平均删牌 {row.get('removes_per_run', '?')}，"
+                    f"锻造 {rest.get('SMITH', '?')}%、休息 {rest.get('HEAL', '?')}%"
+                )
+            add("基本信息", lines[:3])
+            add("角色行为", lines)
+        elif metric == "hopper":
+            rows = [
+                item
+                for item in data.get("hopper_stolen") or []
+                if isinstance(item, dict)
+            ]
+            names = await self._names("card", [item.get("id") for item in rows])
+            lines = [
+                f"{names[index] if names[index] != item.get('id') else item.get('name')}"
+                f"：{item.get('pct')}%"
+                for index, item in enumerate(rows)
+            ]
+            add("基本信息", lines[:3])
+            add("被偷卡牌", lines)
+        elif metric == "matrix":
+            lines = []
+            for char_id, levels in (data.get("ascension_matrix") or {}).items():
+                if not isinstance(levels, dict):
+                    continue
+                name = CHARACTERS.get(str(char_id), str(char_id))
+                picks = [
+                    f"A{level} {value.get('win_rate')}%"
+                    for level, value in sorted(
+                        levels.items(), key=lambda pair: int(pair[0])
+                    )
+                    if isinstance(value, dict) and value.get("win_rate") is not None
+                ]
+                if picks:
+                    lines.append(name + "：" + " · ".join(picks))
+            add("基本信息", lines[:2])
+            add("进阶矩阵", lines)
+        elif metric == "records":
+            records = data.get("records") or {}
+            lines = []
+            for key, label in (
+                ("fastest_win", "最快通关"),
+                ("longest_run", "最长一局"),
+                ("biggest_deck", "最大卡组"),
+            ):
+                item = records.get(key)
+                if not isinstance(item, dict):
+                    continue
+                if item.get("run_time") is not None:
+                    lines.append(f"{label}：{self._duration(item['run_time'])}")
+                elif item.get("size") is not None:
+                    lines.append(f"{label}：{item['size']} 张")
+            add("基本信息", lines[:3])
+            add("极限记录", lines)
+
+    @staticmethod
+    def _duration(seconds):
+        try:
+            total = int(seconds)
+        except (TypeError, ValueError):
+            return str(seconds)
+        hours, remainder = divmod(total, 3600)
+        minutes, secs = divmod(remainder, 60)
+        return f"{hours}小时{minutes}分{secs}秒"
 
     def _guide_sections(self, entity, add):
         info = []

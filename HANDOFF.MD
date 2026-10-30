@@ -145,7 +145,7 @@
 - 搜索会命中描述且同名实体多：`search` 必须精确名称优先；同名候选带角色/类型标签，并设置 `choice_intro`，不能沿用“没有同名条目”的默认文案。
 - BBCode：`clean()` 把 `[energy:N]` 转 `N费`、空强调对 `[blue][/blue]` 转 `X`；能力 `description` 可能丢数值，`effect_text` 先 `description` 后 `description_raw`。不要把 `[gold]` 等标签原样送进卡片或模型。
 - `_tool_read` 对 sts2 单独处理：source 留空或 `spirecodex`；不要走 `read_from_source`（它只认 bwiki 且会拒绝其他游戏）。
-- 验证：`pytest -q` 402 passed；Ruff 通过；framework 4.5.7/4.29.3 通过；package 35 files/11,130,568 bytes；Spire Codex 冒烟 25/25；覆盖率审计诊断 39/41（仅“攻略/机制”因中文源超时回退英文），本地 `--strict` 阈值 80% 通过。
+- 验证：`pytest -q` 403 passed；Ruff 通过；framework 4.5.7/4.29.3 通过；package 35 files/11,132,595 bytes；Spire Codex 冒烟 25/25；覆盖率审计诊断 45/47（仅“攻略/机制”因中文源超时回退英文），本地 `--strict` 阈值 80% 通过。
 - 尚无备用源；Spire Codex 故障时只能明确报错。未改版本号。
 
 ## 杀戮尖塔2 计划内增强（2026-10-30）
@@ -228,3 +228,9 @@
 - 繁体：`_langs` 对 CJK 追加 `zht`；Spire Codex 的 zht 搜索很稀疏，若 zht 无结果而 zhs 只有一个候选且查询含繁体特征字，可把该候选视为精确匹配。`_detail` 仍用 zhs，输出简体正文。
 - 无空格方面词拆分：`_split_aspect` 让 `Bash 效果`、`燃烧之血效果` 在 AI 工具直接调用时也能拆出 query/question；`剧情/故事/机制/攻略/成就/解锁/商店/价格/先古/胜率` 等元/攻略词必须跳过，否则“静默猎手剧情”会被拆成角色名后落到角色页。
 - 同名限定：`_split_qualified` 只在括号/分隔符后的限定词属于角色或类型白名单时拆分，`树叶史莱姆（中）` 这类真实条目名不能被误拆。
+
+## 杀戮尖塔2 扩展社区统计（2026-10-30）
+
+- 新增 `map/survival/behavior/hopper/matrix/records` 六类：地图按幕输出普通/精英/Boss 死亡率，生存曲线取 1/5/10/.../50 层，角色行为显示平均删牌与锻造/休息占比，被偷卡牌解析中文卡名，进阶矩阵按角色列出 A0–A10 胜率，记录显示最快通关/最长一局/最大卡组。
+- `_split_kind_prefix` 现在要求类型词后有空格或分隔符；“角色行为”“遗物效果”不能被当成“角色/遗物 + 实体”拆开，否则会丢掉整词概念。
+- 社区统计的摘要行同时放进 `基本信息`，裸名称查询不会只看到“统计截至”一行。
