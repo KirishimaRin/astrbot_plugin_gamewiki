@@ -1173,6 +1173,11 @@ class SpireCodexService:
             item = next((row for row in unlocks if row.get("name") == name), None)
             if item is not None:
                 add("解锁条件", [clean(item.get("unlock_info") or "")])
+        if kind == "event" and any(
+            word in guide_text
+            for word in ("选哪个", "怎么选", "选择", "选项", "社区选择")
+        ):
+            await self._event_community_section(entity, add)
         if kind in PAIRING_TYPES and any(
             word in question + section for word in COMMUNITY_WORDS
         ):
@@ -1559,6 +1564,46 @@ class SpireCodexService:
         elif pattern.get("type") == "conditional" and len(lines) > 1:
             lines.insert(0, "按条件选择以下招式：")
         return lines[:7]
+
+    async def _event_community_section(self, entity, add):
+        try:
+            stats = await self.client.get(
+                "/api/runs/community-stats", {}, self.page_ttl
+            )
+        except WikiError:
+            return
+        rows = stats.get("events") if isinstance(stats, dict) else []
+        row = next(
+            (item for item in rows or [] if item.get("id") == entity.get("id")),
+            None,
+        )
+        if not isinstance(row, dict):
+            return
+        titles = {
+            str(option.get("id")): clean(option.get("title"))
+            for option in entity.get("options") or []
+            if isinstance(option, dict)
+        }
+        # Branch pages carry the follow-up options (沉溺/离开浴场), which are
+        # not in the top-level options list.
+        for page in entity.get("pages") or []:
+            for option in page.get("options") or []:
+                if isinstance(option, dict):
+                    titles.setdefault(str(option.get("id")), clean(option.get("title")))
+        lines = []
+        for option in row.get("options") or []:
+            if not isinstance(option, dict):
+                continue
+            title = titles.get(
+                str(option.get("id")), option.get("label") or option.get("id")
+            )
+            if option.get("pct") is not None:
+                lines.append(f"{title}：{option['pct']}%")
+        if lines:
+            add(
+                "社区选择",
+                lines + [f"共 {row.get('total', '?')} 次选择，占比仅供参考。"],
+            )
 
     def _event_sections(self, entity, add):
         info = []

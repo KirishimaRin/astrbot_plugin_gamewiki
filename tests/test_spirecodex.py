@@ -209,7 +209,14 @@ EVENTS = [
         "id": "ABYSSAL_BATHS",
         "name": "深渊浴场",
         "description": "池水灼烧。",
-        "options": [],
+        "options": [
+            {
+                "id": "LINGER",
+                "title": "沉溺",
+                "description": "获得2点最大生命，受到3点伤害。",
+            },
+            {"id": "EXIT_BATHS", "title": "离开浴场", "description": ""},
+        ],
         "pages": [],
     }
 ]
@@ -294,6 +301,21 @@ SEARCH = {
                         "name": "防御",
                         "path": "/cards/defend_ironclad",
                         "subtitle": "ironclad · 技能 · 基础",
+                    }
+                ],
+            }
+        ],
+    },
+    "深渊浴场": {
+        "query": "深渊浴场",
+        "categories": [
+            {
+                "kind": "event",
+                "items": [
+                    {
+                        "name": "深渊浴场",
+                        "path": "/events/abyssal_baths",
+                        "subtitle": "Shared",
                     }
                 ],
             }
@@ -506,6 +528,21 @@ def make_service(tmp_path, calls=None):
                             "win_rate": 21.1,
                         }
                     ],
+                    "events": [
+                        {
+                            "id": "ABYSSAL_BATHS",
+                            "name": "Abyssal Baths",
+                            "total": 1106091,
+                            "options": [
+                                {"id": "LINGER", "label": "Linger", "pct": 59.5},
+                                {
+                                    "id": "EXIT_BATHS",
+                                    "label": "Exit Baths",
+                                    "pct": 14.4,
+                                },
+                            ],
+                        }
+                    ],
                 },
             )
         if path == "/api/ascensions":
@@ -522,6 +559,8 @@ def make_service(tmp_path, calls=None):
             return httpx.Response(200, json=ENCOUNTERS)
         if path == "/api/events":
             return httpx.Response(200, json=EVENTS)
+        if path == "/api/events/abyssal_baths":
+            return httpx.Response(200, json=EVENTS[0])
         if path == "/api/guides":
             return httpx.Response(200, json=GUIDES)
         if path == "/api/guides/boss-guide":
@@ -915,3 +954,21 @@ def test_meta_ascension_achievement_unlock_and_act(tmp_path):
     assert act["title"] == "密林"
     assert "BOSS" in act["available_sections"]
     assert "精英" in act["available_sections"]
+
+
+def test_event_choice_shows_community_share(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            return await service.search("深渊浴场", "选哪个")
+        finally:
+            await client.close()
+
+    result = asyncio.run(run())
+    assert result["status"] == "ok"
+    assert "社区选择" in result["available_sections"]
+    text = "\n".join(item["text"] for item in result["evidence"])
+    assert "沉溺：59.5%" in text
+    assert "离开浴场：14.4%" in text
+    assert "仅供参考" in text
