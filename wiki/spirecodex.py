@@ -282,6 +282,12 @@ REST_NAMES = {
     "Cook": "烹饪",
 }
 GENERIC_CARD_NAMES = {"STRIKE": "打击", "DEFEND": "防御"}
+UNLOCK_LABELS = {
+    "characters": "角色",
+    "cards": "卡牌",
+    "relics": "遗物",
+    "potions": "药水",
+}
 STACK_TYPES = {"Counter": "可叠加", "Single": "不可叠加"}
 GLOSSARY_CATEGORIES = {
     "combat": "战斗",
@@ -302,6 +308,9 @@ COMMUNITY_WORDS = (
     "强度",
     "评分",
     "好用",
+    "适合",
+    "值得",
+    "值不值",
 )
 
 EMPTY_TAG = re.compile(r"\[([a-z_]+)\]\[/\1\]")
@@ -813,20 +822,44 @@ class SpireCodexService:
                     "name": f"进阶{level} {item.get('name', '')}".strip(),
                 }
                 return await self._entry("ascension", item, question, "")
-        if "成就" in text:
+        if any(word in text for word in ("成就", "怎么完成", "达成")):
             items = await self._index("achievement", "zhs")
             if items:
-                return await self._entry(
-                    "achievement",
-                    {"id": "ALL", "title": "成就列表", "achievements": items},
-                    question,
-                    "",
+                item = next(
+                    (row for row in items if row.get("name") and row["name"] in text),
+                    None,
                 )
+                if item is not None:
+                    return await self._entry("achievement", item, question, "")
+                if "成就" in text:
+                    return await self._entry(
+                        "achievement",
+                        {"id": "ALL", "title": "成就列表", "achievements": items},
+                        question,
+                        "",
+                    )
         if "解锁" in text:
-            for item in await self._unlock_index():
+            unlocks = await self._unlock_index()
+            for item in unlocks:
                 name = str(item.get("name", ""))
                 if name and name in text:
                     return await self._entry("unlock", item, question, "")
+            for category, label in UNLOCK_LABELS.items():
+                if label in text:
+                    rows = [
+                        item for item in unlocks if item.get("category") == category
+                    ]
+                    if rows:
+                        return await self._entry(
+                            "unlock",
+                            {
+                                "id": f"ALL_{category}",
+                                "name": label + "解锁",
+                                "unlocks": rows,
+                            },
+                            question,
+                            "",
+                        )
         community_key = self._community_key(text)
         if community_key:
             try:
@@ -977,6 +1010,22 @@ class SpireCodexService:
             exact = await self._term_exact(wanted, hint)
             if exact and not items:
                 items = exact
+        if (
+            question
+            and "商店" in normalized
+            and any(word in question for word in ("买什么", "买啥", "价格", "多少钱"))
+        ):
+            meta = await self._meta_result(normalized, question)
+            if meta:
+                return {**meta, **base}
+        if (
+            question
+            and "解锁" in question
+            and normalized in set(UNLOCK_LABELS.values())
+        ):
+            meta = await self._meta_result(normalized, question)
+            if meta:
+                return {**meta, **base}
         if not exact:
             meta = await self._meta_result(normalized, question)
             if meta:
@@ -1302,7 +1351,8 @@ class SpireCodexService:
             if subtitle:
                 parts.append(MONSTER_TYPES.get(subtitle, subtitle))
         elif kind == "encounter":
-            parts.append(ROOM_TYPES.get(subtitle, subtitle) if subtitle else "遭遇")
+            room = ROOM_TYPES.get(subtitle, subtitle) if subtitle else ""
+            parts.append("遭遇 · " + room if room else "遭遇")
         elif kind == "event":
             parts.append("事件")
         elif kind == "power":
@@ -1393,9 +1443,16 @@ class SpireCodexService:
             return await self.chinese.read(str(key))
         if kind == "unlock":
             items = await self._unlock_index()
-            return next(
-                (item for item in items if str(item.get("id")) == str(key)), None
-            )
+            key = str(key)
+            if key.startswith("ALL_"):
+                category = key[4:]
+                rows = [item for item in items if item.get("category") == category]
+                return {
+                    "id": key,
+                    "name": UNLOCK_LABELS.get(category, category) + "解锁",
+                    "unlocks": rows,
+                }
+            return next((item for item in items if str(item.get("id")) == key), None)
         if kind == "achievement" and str(key) == "ALL":
             return {
                 "id": "ALL",
@@ -1471,7 +1528,19 @@ class SpireCodexService:
         guide_text = question + section
         wants_character_guide = any(
             word in guide_text
-            for word in ("攻略", "指南", "流派", "怎么玩", "玩法", "推荐")
+            for word in (
+                "攻略",
+                "指南",
+                "流派",
+                "怎么玩",
+                "玩法",
+                "推荐",
+                "排行",
+                "Tier",
+                "tier",
+                "强度榜",
+                "梯度",
+            )
         ) or ("卡组" in guide_text and "初始" not in guide_text)
         if kind == "character" and self.chinese is not None and wants_character_guide:
             try:
@@ -1500,6 +1569,42 @@ class SpireCodexService:
             item = next((row for row in unlocks if row.get("name") == name), None)
             if item is not None:
                 add("解锁条件", [clean(item.get("unlock_info") or "")])
+        if kind == "character" and any(
+            word in guide_text for word in ("剧情", "故事", "故事线")
+        ):
+            stories = await self._index("story", "zhs")
+            story = next(
+                (row for row in stories if row.get("name") == entity.get("name")),
+                None,
+            )
+            if story is not None:
+                await self._story_sections(story, add)
+        if kind == "character" and "胜率" in guide_text:
+            match = re.search(r"(?:[AaNn]|进阶|难度)\s*(\d{1,2})", guide_text)
+            if match and 0 <= int(match.group(1)) <= 10:
+                level = int(match.group(1))
+                try:
+                    stats = await self.client.get(
+                        "/api/runs/community-stats", {}, self.page_ttl
+                    )
+                except WikiError:
+                    stats = {}
+                matrix = (
+                    stats.get("ascension_matrix") if isinstance(stats, dict) else {}
+                )
+                row = (
+                    (matrix or {})
+                    .get(str(entity.get("id", "")).casefold(), {})
+                    .get(str(level))
+                )
+                if isinstance(row, dict) and row.get("win_rate") is not None:
+                    add(
+                        "进阶胜率",
+                        [
+                            f"进阶{level}胜率 {row['win_rate']}%，"
+                            f"{row.get('runs', '?')} 局。"
+                        ],
+                    )
         if kind == "event" and any(
             word in guide_text
             for word in ("选哪个", "怎么选", "选择", "选项", "社区选择")
@@ -2129,6 +2234,13 @@ class SpireCodexService:
         ]
         if elites:
             add("精英", elites)
+        normal = [
+            item.get("name", "")
+            for item in encounters
+            if item.get("id") in wanted and item.get("room_type") == "Monster"
+        ]
+        if normal:
+            add("普通遭遇", normal)
         events = await self._names("event", entity.get("events") or [])
         if events:
             add("事件", events)
@@ -2161,6 +2273,16 @@ class SpireCodexService:
             add("备注", [condition])
 
     def _unlock_sections(self, entity, add):
+        rows = entity.get("unlocks")
+        if isinstance(rows, list):
+            lines = [
+                f"{item.get('name', '')}：{clean(item.get('unlock_info') or '')}"
+                for item in rows
+                if isinstance(item, dict)
+            ]
+            add("基本信息", [f"名称：{entity.get('name', '')}", *lines[:3]])
+            add("解锁列表", lines)
+            return
         info = []
         for field, label in (
             ("name", "名称"),

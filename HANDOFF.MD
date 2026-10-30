@@ -145,7 +145,7 @@
 - 搜索会命中描述且同名实体多：`search` 必须精确名称优先；同名候选带角色/类型标签，并设置 `choice_intro`，不能沿用“没有同名条目”的默认文案。
 - BBCode：`clean()` 把 `[energy:N]` 转 `N费`、空强调对 `[blue][/blue]` 转 `X`；能力 `description` 可能丢数值，`effect_text` 先 `description` 后 `description_raw`。不要把 `[gold]` 等标签原样送进卡片或模型。
 - `_tool_read` 对 sts2 单独处理：source 留空或 `spirecodex`；不要走 `read_from_source`（它只认 bwiki 且会拒绝其他游戏）。
-- 验证：`pytest -q` 405 passed；Ruff 通过；framework 4.5.7/4.29.3 通过；package 35 files/11,134,730 bytes；Spire Codex 冒烟 25/25；覆盖率审计诊断 45/47（仅“攻略/机制”因中文源超时回退英文），本地 `--strict` 阈值 80% 通过。
+- 验证：`pytest -q` 409 passed；Ruff 通过；framework 4.5.7/4.29.3 通过；package 35 files/11,135,524 bytes；Spire Codex 冒烟 25/25；覆盖率审计诊断 52/54（仅“攻略/机制”因中文源超时回退英文），本地 `--strict` 阈值 80% 通过。
 - 尚无备用源；Spire Codex 故障时只能明确报错。未改版本号。
 
 ## 杀戮尖塔2 计划内增强（2026-10-30）
@@ -247,3 +247,13 @@
 - STS2FRONT：未找到 terms/privacy/contact 页面；robots `Allow: /` 并提供 sitemap；页面声明内容来自 Mega Crit 官方发布、游戏内数据和社区报告，同样没有明确的正文再分发授权。
 - 结论：抓取技术上被 robots 允许，但正文没有显式授权。当前只做按需抓取、短节选（`EXCERPT_CHARS=2500`）、来源标注和原文链接，不镜像、不打包全文；`sts2_chinese_sources=false` 可完全回退 Spire Codex 英文。若插件进行商业分发或大规模运营，应先联系站点运营方取得授权。
 - 测试 fixture 只使用合成 HTML 片段，不把 STS2.INFO/STS2FRONT 整页纳入仓库或安装包。
+
+## 杀戮尖塔2 用户问法补强（2026-10-30）
+
+- 角色页：问题含“剧情/故事”时关联 `/api/stories` 与 `/api/epochs` 追加“故事线”；问题含“胜率”且带 `A10/进阶N/难度N` 时读 `ascension_matrix` 追加“进阶胜率”。
+- 章节页：普通怪问法映射到“普通遭遇”，不再只列 BOSS/精英/事件；`_act_sections` 过滤 `room_type == Monster`。
+- 商店“买什么/买啥/价格/多少钱”在精确实体之前优先走 merchant 配置，避免被术语“商店”截走。
+- 解锁总览：`遗物/卡牌/角色/药水 + 怎么解锁` 在精确实体前走 `/api/unlocks` 分类列表；`unlock` 的 `ALL_*` page_id 由 `_detail` 特殊还原。
+- 具体成就名（如“完美牌组 怎么完成”）在 `/api/achievements` 中精确匹配，不再要求问题里出现“成就”二字。
+- `适合/值得/值不值` 纳入卡牌/遗物社区分节触发词；`_split_kind_prefix` 要求分隔符，`角色行为`/`遗物效果` 不再被拆。
+- 遭遇候选标签加“遭遇 ·”，与同名怪物候选区分。

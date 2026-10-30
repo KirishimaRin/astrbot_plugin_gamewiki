@@ -99,7 +99,19 @@ CHARACTERS = [
             "Bash",
         ],
         "unlocks_after": None,
-    }
+    },
+    {
+        "id": "SILENT",
+        "name": "静默猎手",
+        "description": "静默猎手靠奇巧和弃牌。",
+        "starting_hp": 70,
+        "starting_gold": 99,
+        "max_energy": 3,
+        "orb_slots": None,
+        "starting_relics": [],
+        "starting_deck": [],
+        "unlocks_after": None,
+    },
 ]
 GLOSSARY = [
     {
@@ -174,6 +186,15 @@ ACHIEVEMENTS = [
     }
 ]
 UNLOCKS = {
+    "relics": [
+        {
+            "id": "RED_SKULL",
+            "name": "红头骨",
+            "epoch_id": "RELIC1_EPOCH",
+            "epoch_title": "涂鸦",
+            "unlock_info": "通过积累分数来解锁。",
+        }
+    ],
     "characters": [
         {
             "id": "SILENT",
@@ -183,7 +204,7 @@ UNLOCKS = {
             "era": "门扉",
             "unlock_info": "以铁甲战士完成一局游戏来揭示这个历史节点。",
         }
-    ]
+    ],
 }
 ENCOUNTERS = [
     {
@@ -314,6 +335,21 @@ SEARCH = {
                         "name": "燃燒之血",
                         "path": "/relics/burning_blood",
                         "subtitle": "初始遺物 · ironclad",
+                    }
+                ],
+            }
+        ],
+    },
+    "静默猎手": {
+        "query": "静默猎手",
+        "categories": [
+            {
+                "kind": "character",
+                "items": [
+                    {
+                        "name": "静默猎手",
+                        "path": "/characters/silent",
+                        "subtitle": "",
                     }
                 ],
             }
@@ -658,7 +694,8 @@ def make_service(tmp_path, calls=None):
                         "ironclad": {
                             "0": {"win_rate": 24.3},
                             "10": {"win_rate": 20.9},
-                        }
+                        },
+                        "silent": {"10": {"win_rate": 22.5, "runs": 100}},
                     },
                     "records": {
                         "fastest_win": {"run_time": 900, "run_hash": "x"},
@@ -722,7 +759,7 @@ def test_character_and_encounter_labels_and_images(tmp_path):
         SpireCodexService._label(
             {"name": "一大群史莱姆", "kind": "encounter", "subtitle": "Monster"}
         )
-        == "一大群史莱姆 · 普通战斗"
+        == "一大群史莱姆 · 遭遇 · 普通战斗"
     )
     service, client, _ = make_service(tmp_path)
     try:
@@ -1276,3 +1313,75 @@ def test_extra_community_stats_queries(tmp_path):
     assert behavior["status"] == "ok" and "角色行为" in behavior["available_sections"]
     assert matrix["status"] == "ok" and "进阶矩阵" in matrix["available_sections"]
     assert "A10 20.9%" in "\n".join(item["text"] for item in matrix["evidence"])
+
+
+def test_character_story_and_ascension_winrate(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            story = await service.search("静默猎手", "剧情")
+            ascension = await service.search("静默猎手", "A10胜率")
+            return story, ascension
+        finally:
+            await client.close()
+
+    story, ascension = asyncio.run(run())
+    assert story["status"] == "ok"
+    assert "故事线" in story["available_sections"]
+    assert ascension["status"] == "ok"
+    assert "进阶胜率" in ascension["available_sections"]
+    assert "22.5%" in "\n".join(item["text"] for item in ascension["evidence"])
+
+
+def test_act_normal_encounters_and_merchant(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            act = await service.search("第一章", "有哪些普通怪")
+            merchant = await service.search("商店", "买什么")
+            return act, merchant
+        finally:
+            await client.close()
+
+    act, merchant = asyncio.run(run())
+    assert act["status"] == "ok"
+    assert "普通遭遇" in act["available_sections"]
+    assert "一大群史莱姆" in "\n".join(item["text"] for item in act["evidence"])
+    assert merchant["status"] == "ok"
+    assert "删牌服务" in merchant["available_sections"]
+
+
+def test_unlock_overview_and_exact_achievement(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            unlock = await service.search("遗物", "怎么解锁")
+            achievement = await service.search("完美牌组", "怎么完成")
+            return unlock, achievement
+        finally:
+            await client.close()
+
+    unlock, achievement = asyncio.run(run())
+    assert unlock["status"] == "ok"
+    assert "解锁列表" in unlock["available_sections"]
+    assert "红头骨" in "\n".join(item["text"] for item in unlock["evidence"])
+    assert achievement["status"] == "ok"
+    assert achievement["title"] == "完美牌组"
+    assert "条件" in achievement["available_sections"]
+
+
+def test_relic_suitability_uses_community_sections(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            return await service.search("燃烧之血", "适合铁甲战士吗")
+        finally:
+            await client.close()
+
+    result = asyncio.run(run())
+    assert result["status"] == "ok"
+    assert "胜率" in result["available_sections"]
