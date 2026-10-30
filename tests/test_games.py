@@ -7,21 +7,42 @@ import httpx
 
 from wiki.cache import Cache
 from wiki.client import WikiClient
-from wiki.games import PROFILES, YS, parse_alias_config
+from wiki.games import (
+    PROFILES,
+    YS,
+    normalize_slang,
+    parse_alias_config,
+    source_api,
+)
 from wiki.models import Section, page_url
 from wiki.query import QueryService
 
 
-def test_profiles_cover_six_games_with_unique_commands():
-    assert set(PROFILES) == {"ys", "sr", "zzz", "arknights", "zmd", "sts2"}
+def test_profiles_cover_seven_games_with_unique_commands():
+    assert set(PROFILES) == {"ys", "sr", "zzz", "arknights", "zmd", "sts2", "ww"}
     commands = [p.command for p in PROFILES.values()]
     assert len(commands) == len(set(commands))
-    assert commands == ["ys", "sr", "zzz", "ark", "zmd", "sts2"]
+    assert commands == ["ys", "sr", "zzz", "ark", "zmd", "sts2", "ww"]
     assert all(not profile.aliases for profile in PROFILES.values())
     assert YS.card_words, "only the Genshin profile routes card lookups"
     for code, profile in PROFILES.items():
         if code != "ys":
             assert not profile.card_words
+
+
+def test_ww_profile_targets_the_wutheringwaves_site():
+    assert PROFILES["ww"].name == "鸣潮"
+    assert source_api("ww", "bwiki") == (
+        "https://wiki.biligame.com/wutheringwaves/api.php"
+    )
+    assert page_url("共鸣者/今汐", code="ww") == (
+        "https://wiki.biligame.com/wutheringwaves/"
+        "%E5%85%B1%E9%B8%A3%E8%80%85/%E4%BB%8A%E6%B1%90"
+    )
+    # 链类黑话只在后缀位归一，前缀形式保持原样让实体可检索。
+    assert normalize_slang("今汐六链效果", PROFILES["ww"]) == "今汐共鸣链效果"
+    assert normalize_slang("满链今汐怎么样", PROFILES["ww"]) == "满链今汐怎么样"
+    assert normalize_slang("今汐大招倍率", PROFILES["ww"]) == "今汐共鸣解放倍率"
 
 
 def test_page_url_uses_the_game_code():

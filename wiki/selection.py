@@ -176,6 +176,11 @@ def evidence(
     ]
     if len(contributing) > 1:
         fields = ()
+    else:
+        # 字段过滤只取本页确有对应分节的意图行：全局行的字段（如“获取”
+        # 行的 来源/掉落）落在只有「概览」分节的道具页上会把纯介绍正文
+        # 滤成空，得不到任何摘录。
+        fields = tuple(f for _, _, names in contributing for f in names)
 
     if section and not candidates:
         return [], False, meta("section", [])

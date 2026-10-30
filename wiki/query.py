@@ -16,7 +16,8 @@ from .models import Page, WikiError, page_url
 # the exact-title match that decides whether a hit may be auto-read.
 TITLE_TRIM = re.compile(r"[\s。！？～，、；：…（）()\[\]【】「」『』\"'”’]+$")
 
-# 角色页才有的分节标记，用来区分角色与武器/道具页（配装子页只对角色有意义）。
+# 角色页才有的分节标记，用来区分角色与武器/道具页（配装/语音子页只对
+# 角色有意义）。共鸣链为鸣潮角色页标记。
 CHARACTER_SECTIONS = (
     "属性数据",
     "角色晋阶材料",
@@ -25,6 +26,7 @@ CHARACTER_SECTIONS = (
     "星魂",
     "意象影画",
     "角色故事",
+    "共鸣链",
 )
 
 ALIASES = {
@@ -77,6 +79,21 @@ class QueryService:
     @staticmethod
     def _title_key(text: str) -> str:
         return TITLE_TRIM.sub("", text.strip()).strip("「『\"'“‘")
+
+    def _match_key(self, text: str) -> str:
+        """Comparison key for exact-name matching.
+
+        Games whose titles carry a single namespace prefix (鸣潮
+        「共鸣者/今汐」) match on the last segment, so a bare「今汐」can
+        auto-read the prefixed page. Deeper subpages (「…/语音」) keep
+        their own tail and never match the bare name.
+        """
+        key = self._title_key(text)
+        if self.profile.title_namespaces:
+            head, sep, tail = key.rpartition("/")
+            if sep and head and tail and "/" not in head:
+                return self._title_key(tail)
+        return key
 
     def _validate(self, text, length=200):
         if not isinstance(text, str) or not text.strip() or len(text) > length:
@@ -181,10 +198,10 @@ class QueryService:
             if hint:
                 payload["message"] += "\n" + hint
             return payload
-        wanted_key = self._title_key(normalized)
+        wanted_key = self._match_key(normalized)
         hits.sort(
             key=lambda h: (
-                self._title_key(h["title"]) == wanted_key,
+                self._match_key(h["title"]) == wanted_key,
                 ("卡牌：" in h["title"]) == card,
                 "/攻略" not in h["title"],
             ),
@@ -205,7 +222,7 @@ class QueryService:
         # 骏卫 through the word 雪祀), so never auto-read without an exact
         # title match; hand the candidates back instead.
         if _followed_suggestion or not any(
-            self._title_key(h["title"]) == wanted_key for h in hits
+            self._match_key(h["title"]) == wanted_key for h in hits
         ):
             payload = {
                 "status": "needs_choice",
@@ -231,26 +248,39 @@ class QueryService:
         focus = "" if question in {"", query, normalized} else question
         result.update(await self._read(hits[0]["pageid"], focus, ""))
         # BWIKI 原神/星铁把配装推荐放在角色「/攻略」子页，主页只有跳转
-        # （原神）或干脆没有（星铁）。问句命中配装类方面词且当前页是
-        # 角色页时优先读子页；子页不存在就保留主页结果。
-        guide = self.profile.guide_suffix
-        if (
-            guide
-            and focus
-            and "/" not in hits[0]["title"]
-            and any(word in focus for word in self.profile.guide_aspects)
-            and any(
+        # （原神）或干脆没有（星铁）；两游戏的语音正文在「/语音」子页。
+        # 问句命中对应方面词且当前页是角色页时优先读子页；子页不存在就
+        # 保留主页结果。鸣潮标题自带命名空间前缀，先剥掉再判断子页。
+        sub_rows = []
+        if self.profile.guide_suffix:
+            sub_rows.append((self.profile.guide_aspects, self.profile.guide_suffix))
+        sub_rows.extend(self.profile.sub_pages)
+        raw_title = hits[0]["title"]
+        if self.profile.title_namespaces:
+            ns, sep, leaf = raw_title.partition("/")
+            sub_base = (
+                leaf if sep and ns in self.profile.title_namespaces else raw_title
+            )
+        else:
+            sub_base = raw_title
+        for aspects, suffix in sub_rows:
+            if not (focus and "/" not in sub_base):
+                continue
+            if not any(word in focus for word in aspects):
+                continue
+            if not any(
                 marker in result.get("available_sections", [])
                 for marker in CHARACTER_SECTIONS
-            )
-        ):
+            ):
+                continue
             try:
-                sub = await self._read(hits[0]["title"] + guide, focus, "")
+                sub = await self._read(raw_title + suffix, focus, "")
             except WikiError:
                 sub = None
             if sub and sub.get("status") == "ok":
                 result["resolved_from"] = result["url"]
                 result.update(sub)
+                break
         # Same-name item pages may point to a book chapter in their hatnote.
         # Follow only that exact chapter, once, for reading/content requests.
         wants_content = (

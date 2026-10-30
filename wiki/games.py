@@ -43,6 +43,13 @@ class GameProfile:
     # 问句命中 guide_aspects 时优先读子页，子页不存在再回主页。
     guide_suffix: str = ""
     guide_aspects: tuple = ()
+    # 其他「<实体>/<子页>」形态（如两游戏的「/语音」）：问句命中方面词
+    # 且主页存在角色页标记时优先读子页，缺失回主页。与 guide_suffix 同一
+    # 流程，只是可配多组。
+    sub_pages: tuple = ()
+    # 条目标题统一带命名空间前缀（鸣潮：共鸣者/武器/声骸/…）。
+    # 非空时精确匹配改为比较最后一段，且仅对恰好一段前缀的标题生效。
+    title_namespaces: tuple = ()
     # Evidence card accent color (RGB); empty falls back to a neutral gray.
     accent: tuple = ()
 
@@ -73,7 +80,7 @@ PLUS_TARGETS = {"ys": "命之座", "sr": "星魂", "zzz": "意象影画"}
 # 替换会把修饰语焊进实体名（“命之座魈”），检索不到实体。只有这些目标
 # 词需要做位置判定。
 MODIFIER_TARGETS = frozenset(
-    {"命之座", "星魂", "意象影画", "精英化", "专精", "潜能", "精炼5"}
+    {"命之座", "星魂", "意象影画", "共鸣链", "精英化", "专精", "潜能", "精炼5"}
 )
 
 # 比较连接词：归一的位置判定与 assistant 的比较拆分共用一份。
@@ -168,6 +175,8 @@ YS = GameProfile(
     # 「<角色>/攻略」：角色定位 / 配装推荐 / 圣遗物 / 武器 / 阵容搭配。
     guide_suffix="/攻略",
     guide_aspects=("圣遗物", "武器", "配装", "词条", "阵容", "配队"),
+    # 语音正文在「<角色>/语音」子页，主页语音分节只有栏目导航。
+    sub_pages=((("语音", "台词"), "/语音"),),
     accent=(64, 145, 108),
 )
 
@@ -541,6 +550,70 @@ STS2 = GameProfile(
     accent=(170, 52, 44),
 )
 
+# BWIKI 鸣潮站路径是 wutheringwaves（不是 ww）；角色页为 共鸣者/<名>，
+# 声骸套装页 声骸合鸣/<名> 用「2件套效果/5件套效果」字段行。
+WW = GameProfile(
+    code="ww",
+    name="鸣潮",
+    command="ww",
+    title_namespaces=("共鸣者", "角色", "武器", "声骸", "声骸合鸣", "敌人", "道具"),
+    intents=(
+        # 声骸套装页的字段行是「2件套效果」「5件套效果」；全局行只认
+        # 套装效果/基础属性，会漏掉这两个字段。
+        (("套装", "2件", "5件", "合鸣", "效果"), ("2件套效果", "5件套效果"), ()),
+        # 角色页突破汇总在「基础属性」模板，武器页是「突破数值」分节。
+        (
+            ("突破", "养成", "升级材料", "培养材料"),
+            ("基础属性", "基本信息", "突破数值"),
+            (),
+        ),
+        # 武器页「可用角色」承接“给谁用/适合谁”。
+        (("谁用", "适合谁", "给谁", "推荐角色"), ("可用角色",), ()),
+        # 道具页只有「概览」一个分节：获取类问法的全局行字段过滤会滤空
+        # 纯介绍正文，这里按标题选中概览且不做字段过滤。
+        (("获取", "哪里", "在哪", "怎么获得", "用途", "是什么"), ("概览",), ()),
+        # UP记录页按年份分节（2.0 之前缺失，条目自身标注计划补全）。
+        (("UP", "up", "当期", "复刻", "有什么", "有哪些"), ("UP记录", "基本信息"), ()),
+    ),
+    specifics=(
+        # 链类问法经 slang 归一为「共鸣链」，这里兜底直接写法。
+        (("共鸣链",), "共鸣链"),
+        (("技能", "普攻", "常态攻击", "战技", "倍率", "伤害"), "技能详情"),
+        (("大招", "解放", "共鸣解放"), "技能详情"),
+        (("出招", "连招", "操作"), "出招说明"),
+        (("档案", "身世", "背景故事"), "档案"),
+        (("语音", "台词"), "语音"),
+        (("突破材料", "养成材料", "突破消耗", "培养材料"), ("基础属性", "突破数值")),
+    ),
+    slang=(
+        # 手柄/键盘键位黑话：鸣潮社区用 E=共鸣技能、R/Q=共鸣解放。
+        ("E技能", "共鸣技能"),
+        ("e技能", "共鸣技能"),
+        ("Q技能", "共鸣解放"),
+        ("q技能", "共鸣解放"),
+        ("R技能", "共鸣解放"),
+        ("r技能", "共鸣解放"),
+        ("大招", "共鸣解放"),
+        # 链序数（一~六链/满链/0链/几链）与命/魂同模式，仅后缀位改写。
+        *_pairs("链", "共鸣链"),
+        ("满链", "共鸣链"),
+        ("0链", "共鸣链"),
+        ("几链", "共鸣链"),
+        ("专武", "武器"),
+    ),
+    # 卡池聚合页（UP记录）只记录到 2.0，当期池问题按表说明最近一场并
+    # 显示条目自带的补全提示，不虚构当前 UP。
+    pool_pages=(
+        (
+            ("卡池", "唤取", "UP池", "up池", "up", "UP", "抽卡", "池子", "复刻"),
+            "UP记录",
+        ),
+    ),
+    # 语音正文在「共鸣者/<名>/语音」子页。
+    sub_pages=((("语音", "台词"), "/语音"),),
+    accent=(184, 148, 76),
+)
+
 # Aspect words shared by every game. The question splitter in assistant.py
 # builds its vocabulary from here plus the per-game intents, so a new aspect
 # word teaches intent parsing for all games at once and cannot drift from
@@ -582,7 +655,7 @@ GENERIC_ASPECTS = (
     "年龄",
 )
 
-PROFILES = {p.code: p for p in (YS, SR, ZZZ, ARKNIGHTS, ZMD, STS2)}
+PROFILES = {p.code: p for p in (YS, SR, ZZZ, ARKNIGHTS, ZMD, STS2, WW)}
 
 # Game-name heads users prepend ("原神纳西妲是谁"); they are context, never
 # the entity, so local parsing peels them before splitting a question.
@@ -593,6 +666,7 @@ GAME_WORDS = {
     "arknights": ("明日方舟", "方舟"),
     "zmd": ("明日方舟:终末地", "明日方舟", "终末地"),
     "sts2": ("杀戮尖塔2", "尖塔2", "STS2", "sts2", "杀戮尖塔"),
+    "ww": ("鸣潮", "Wuthering Waves", "WUTHERING WAVES", "ww", "WW", "WuWa", "wuwa"),
 }
 
 
@@ -705,6 +779,9 @@ def source_api(code: str, source: str) -> str:
         return "https://prts.wiki/api.php"
     if source == "spirecodex" and code == "sts2":
         return "https://spire-codex.com"
+    if code == "ww" and source == "bwiki":
+        # 鸣潮站前缀不是游戏代码：BWIKI 站名为 wutheringwaves。
+        return "https://wiki.biligame.com/wutheringwaves/api.php"
     if source == "bwiki" and code in PROFILES:
         return f"https://wiki.biligame.com/{code}/api.php"
     raise ValueError("Unsupported wiki source")

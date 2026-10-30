@@ -49,9 +49,10 @@
       "zzz",
       "arknights",
       "zmd",
-      "sts2"
+      "sts2",
+      "ww"
     ],
-    "hint": "默认启用全部六款游戏。可用值：ys(原神)、sr(星穹铁道)、zzz(绝区零)、arknights(明日方舟)、zmd(终末地)、sts2(杀戮尖塔2)；已有配置保留，可按需删减。空列表或无有效游戏时回退为全部启用"
+    "hint": "默认启用全部七款游戏。可用值：ys(原神)、sr(星穹铁道)、zzz(绝区零)、arknights(明日方舟)、zmd(终末地)、sts2(杀戮尖塔2)、ww(鸣潮)；已有配置保留，可按需删减。空列表或无有效游戏时回退为全部启用"
   },
   "spire_codex_base": {
     "description": "Spire Codex 接口地址",
