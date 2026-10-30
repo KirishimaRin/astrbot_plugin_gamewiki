@@ -50,6 +50,8 @@ class GameWiki(Star):
         self.debug_log = bool(config.get("debug_log", False))
         self.image_reply = bool(config.get("image_reply", True))
         self.conversation_enabled = bool(config.get("conversation_enabled", True))
+        # 查询开始先回一条提示，避免长时间静默让用户以为没响应。
+        self.query_notice = bool(config.get("query_notice", True))
         self.conversations = Conversations()
         self.recent_outcomes: dict[str, str] = {}
         self.recent_sources: dict[str, str] = {}
@@ -438,6 +440,16 @@ class GameWiki(Star):
         except WikiError as exc:
             yield event.plain_result(str(exc))
             return
+        # 过了限流说明这是一次真实查询；先把“正在查询”发出去，再进入
+        # 搜索、读页和模型调用，长查询期间用户不会面对静默。
+        if self.query_notice:
+            try:
+                await event.send(
+                    event.plain_result(f"正在查询{profile.name}百科，请稍候…")
+                )
+            except Exception:
+                # 提示发送失败不应中断真正的查询。
+                logger.debug("查询提示发送失败，忽略", exc_info=True)
         ticket = (
             self.conversations.begin(key, preserve=selection or followup)
             if self.conversation_enabled and key

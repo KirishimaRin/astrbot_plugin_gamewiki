@@ -1,4 +1,10 @@
 {
+  "query_notice": {
+    "description": "查询开始提示",
+    "type": "bool",
+    "default": true,
+    "hint": "查询开始后先回复一条“正在查询…”，避免搜索与模型调用期间长时间无响应；关闭后只在结果返回时发送"
+  },
   "conversation_enabled": {
     "description": "候选编号选择与条目追问",
     "type": "bool",

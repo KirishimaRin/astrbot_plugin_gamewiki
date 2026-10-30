@@ -121,3 +121,8 @@
 ## v0.3.0 发布修正
 
 - CI framework 契约检查发现：`SourceRouter.profile` 取 `primary.profile`，而终末地主源 `AkeService` 没有该属性，导致 `/zmd` 的 AI 工具路径在归一 question 时 AttributeError。已给 `AkeService` 补 `profile = ZMD`，并补 `满潜/几潜/0潜` 的终末地归一；`scripts/check_framework.py` 的 Service 桩补 `profile`。新增 `test_zmd_tool_read_uses_the_endfield_profile` 防止回归。今后给 SourceRouter 增加依赖主源属性的逻辑时，必须同时确认 QueryService 与 AkeService 两侧契约。
+
+## v0.3.1 版本（查询开始提示）
+
+- metadata、README、CHANGELOG 同步为 v0.3.1。
+- `query_notice`（默认 true）：限流校验通过后、`conversations.begin` 之前发送“正在查询<游戏名>百科，请稍候…”。放在 `_limited` 之后是刻意的——帮助、管理员指令、未启用会话、选择编号越界、限流拒绝都在此之前即时返回，不应先发提示。发送失败只记 debug 日志，不能中断查询。候选选择与追问同样会发提示；测试 fixture 显式关闭 `query_notice` 以聚焦结果断言，提示本身有专项用例。framework 契约脚本里所有 `event.sent` 断言已改为先校验提示、再校验结果。

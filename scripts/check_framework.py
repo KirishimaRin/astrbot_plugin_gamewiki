@@ -257,7 +257,8 @@ async def main():
             event = Event(f"ys {old_parameter}")
             event.is_admin = lambda: True
             assert [r async for r in plugin.wiki_command_ys(event)] == []
-            assert event.sent == [f"{old_parameter}|"], (
+            assert event.sent[0].startswith("正在查询"), event.sent
+            assert event.sent[-1] == f"{old_parameter}|", (
                 "old Chinese parameters must not run admin actions"
             )
         cases = (
@@ -268,7 +269,12 @@ async def main():
             event = Event(text)
             assert filters[filter_index].filter(event, {})
             result = [r async for r in handler(event, **event.extra["parsed_params"])]
-            assert result == [] and event.sent == [expected], (text, result, event.sent)
+            assert result == [] and event.sent[-1] == expected, (
+                text,
+                result,
+                event.sent,
+            )
+            assert event.sent[0].startswith("正在查询")
         assert registered == [
             (name, None) for name in ("ys", "sr", "zzz", "ark", "zmd")
         ]
@@ -317,11 +323,13 @@ async def main():
             formatted_event = Event(f"{profile.command} 排版样例 简介")
             handler = getattr(plugin, f"wiki_command_{code}")
             assert [r async for r in handler(formatted_event)] == []
-            assert len(formatted_event.sent) == 1, code
-            assert formatted_event.sent[0].startswith("【排版样例】\n\n"), code
-            assert "原文摘录" in formatted_event.sent[0], code
-            assert "\n\n【章节甲】\n\n" in formatted_event.sent[0], code
-            assert "\n\n来源：\nhttps://" in formatted_event.sent[0], code
+            assert len(formatted_event.sent) == 2, code
+            assert formatted_event.sent[0].startswith("正在查询"), code
+            reply = formatted_event.sent[1]
+            assert reply.startswith("【排版样例】\n\n"), code
+            assert "原文摘录" in reply, code
+            assert "\n\n【章节甲】\n\n" in reply, code
+            assert "\n\n来源：\nhttps://" in reply, code
             for word in ("stats", "clear-cache"):
                 denied = [r async for r in handler(Event(f"{profile.command} {word}"))]
                 assert "管理员" in denied[0], (code, word)
@@ -357,8 +365,8 @@ async def main():
         plugin.context = ModelContext()
         event = Event("ys 排版样例讲了什么")
         assert [r async for r in plugin.wiki_command_ys(event)] == []
-        assert "根据资料整理的概览" in event.sent[0]
-        assert "查看原文：" in event.sent[0] and len(plugin.context.calls) == 2
+        assert "根据资料整理的概览" in event.sent[1]
+        assert "查看原文：" in event.sent[1] and len(plugin.context.calls) == 2
         plugin.sessions = {"another-session"}
         denied = [r async for r in plugin.wiki_command_ys(Event("ys help"))]
         assert "当前会话未启用" in denied[0]

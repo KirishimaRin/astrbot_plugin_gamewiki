@@ -99,7 +99,12 @@ def plugin():
         module, Event = _install_stubs(data_dir)
         instance = module.GameWiki(
             object(),
-            {"games": ["ys", "sr"], "user_cooldown_seconds": 0},
+            {
+                "games": ["ys", "sr"],
+                "user_cooldown_seconds": 0,
+                # 关注结果内容的用例不叠加“正在查询”提示；提示本身另有专项用例。
+                "query_notice": False,
+            },
         )
         yield instance, Event, module
         asyncio.run(instance.terminate())
@@ -999,5 +1004,64 @@ def test_zmd_tool_read_uses_the_endfield_profile(plugin):
         )
         assert result["status"] == "ok"
         assert captured["question"] == "潜能"
+    finally:
+        asyncio.run(configured.terminate())
+
+
+def test_query_notice_precedes_the_answer(plugin):
+    instance, Event, _ = plugin
+    configured = type(instance)(
+        object(),
+        {"games": ["ys"], "user_cooldown_seconds": 0, "image_reply": False},
+    )
+    try:
+        configured.services["ys"].search = AsyncMock(return_value=_wiki_page())
+        configured.context = SimpleNamespace(
+            get_current_chat_provider_id=AsyncMock(return_value="p"),
+            llm_generate=AsyncMock(
+                return_value=SimpleNamespace(completion_text="需要劫波莲。")
+            ),
+        )
+        event = Event("ys 纳西妲 突破")
+        asyncio.run(_collect(configured.wiki_command_ys(event)))
+        assert event.sent[0] == "正在查询原神百科，请稍候…"
+        assert len(event.sent) == 2 and "劫波莲" in event.sent[1]
+    finally:
+        asyncio.run(configured.terminate())
+
+
+def test_query_notice_can_be_disabled(plugin):
+    instance, Event, _ = plugin
+    configured = type(instance)(
+        object(),
+        {
+            "games": ["ys"],
+            "user_cooldown_seconds": 0,
+            "image_reply": False,
+            "query_notice": False,
+        },
+    )
+    try:
+        configured.services["ys"].search = AsyncMock(return_value=_wiki_page())
+        configured.context = SimpleNamespace(
+            get_current_chat_provider_id=AsyncMock(return_value="p"),
+            llm_generate=AsyncMock(
+                return_value=SimpleNamespace(completion_text="需要劫波莲。")
+            ),
+        )
+        event = Event("ys 纳西妲 突破")
+        asyncio.run(_collect(configured.wiki_command_ys(event)))
+        assert len(event.sent) == 1 and "正在查询" not in event.sent[0]
+    finally:
+        asyncio.run(configured.terminate())
+
+
+def test_query_notice_is_skipped_for_help(plugin):
+    instance, Event, _ = plugin
+    configured = type(instance)(object(), {"games": ["ys"]})
+    try:
+        event = Event("ys help")
+        asyncio.run(_collect(configured.wiki_command_ys(event)))
+        assert len(event.sent) == 1 and "用法：" in event.sent[0]
     finally:
         asyncio.run(configured.terminate())
