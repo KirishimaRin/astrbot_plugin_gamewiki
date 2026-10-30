@@ -38,7 +38,27 @@ PATHS = {
     "affliction": "afflictions",
     "enchantment": "enchantments",
     "glossary": "glossary",
+    "guide": "guides",
+    "mechanic": "mechanics/sections",
 }
+
+# /api/search names the mechanics category "mechanics"; the adapter uses the
+# singular kind so it can share PATHS and page_id encoding.
+SEARCH_KIND = {"mechanics": "mechanic"}
+# Search result paths use /mechanics/{slug}; the API detail path is
+# /api/mechanics/sections/{slug}. Keep the two mappings separate.
+SEARCH_PATHS = {"mechanic": "mechanics"}
+GUIDE_TERMS = (
+    ("boss", "boss"),
+    ("BOSS", "boss"),
+    ("机制", "mechanics"),
+    ("规则", "mechanics"),
+    ("概率", "rates"),
+    ("流派", "build"),
+    ("卡组", "build"),
+    ("攻略", "guide"),
+    ("指南", "guide"),
+)
 
 # Types that /api/search often exposes only as a "reference" entry, or not
 # at all. Their list endpoints are small, so an exact-name fallback is cheap.
@@ -134,6 +154,8 @@ ENERGY_TAG = re.compile(r"\[energy:(\d+)\]")
 PLACEHOLDER = re.compile(r"\{[^{}]{1,80}\}")
 TITLE_TRIM = re.compile(r"[\s。！？～，、；：…（）()\[\]【】「」『』\"'”’]+$")
 CJK = re.compile(r"[一-鿿]")
+MARKDOWN_LINK = re.compile(r"\[([^\]]+)\]\([^)]+\)")
+WIKILINK = re.compile(r"\[\[(?:[a-z]+:)?([^\]]+)\]\]")
 
 
 def clean(text) -> str:
@@ -158,6 +180,16 @@ def clean(text) -> str:
 def effect_text(entity: dict) -> str:
     # A few entities only carry the unresolved template in description_raw.
     return clean(entity.get("description") or entity.get("description_raw") or "")
+
+
+def _markdown_text(text) -> str:
+    """Flatten guide/mechanics markdown for evidence and cards."""
+    text = MARKDOWN_LINK.sub(r"\1", str(text or ""))
+    text = WIKILINK.sub(r"\1", text)
+    text = re.sub(r"(?m)^\s*#{1,6}\s*", "", text)
+    text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
+    text = re.sub(r"[`*_]", "", text)
+    return clean(text)
 
 
 def name_key(text) -> str:
@@ -332,6 +364,10 @@ class SpireCodexService:
             if exact and not items:
                 items = exact
         if not items:
+            # Chinese guide/mechanics questions have no entity to look up;
+            # /api/search indexes English titles, so map the question word.
+            items = await self._guide_items(f"{normalized} {question}")
+        if not items:
             return {
                 **base,
                 "status": "not_found",
@@ -395,8 +431,9 @@ class SpireCodexService:
         items = []
         seen = set()
         for category in data.get("categories", []):
-            kind = category.get("kind", "")
-            path_name = PATHS.get(kind)
+            raw_kind = category.get("kind", "")
+            kind = SEARCH_KIND.get(raw_kind, raw_kind)
+            path_name = SEARCH_PATHS.get(kind, PATHS.get(kind))
             if path_name is None:
                 continue
             for item in category.get("items", []):
@@ -416,6 +453,19 @@ class SpireCodexService:
                     }
                 )
         return items
+
+    async def _guide_items(self, text):
+        for word, query in GUIDE_TERMS:
+            if word in text:
+                data = await self.client.get(
+                    "/api/search", {"q": query, "lang": "eng"}, self.search_ttl
+                )
+                return [
+                    item
+                    for item in self._items(data)
+                    if item["kind"] in {"guide", "mechanic"}
+                ]
+        return []
 
     async def _term_exact(self, wanted, hint=""):
         order = TERM_KINDS
@@ -468,6 +518,8 @@ class SpireCodexService:
             ("affliction", ("苦痛",)),
             ("keyword", ("关键词",)),
             ("enchantment", ("附魔",)),
+            ("guide", ("攻略", "指南")),
+            ("mechanic", ("机制", "规则", "概率")),
             ("character", ("角色", "人物")),
         ):
             if any(word in question for word in words):
@@ -521,6 +573,10 @@ class SpireCodexService:
             parts.append("关键词")
         elif kind == "enchantment":
             parts.append("附魔")
+        elif kind == "guide":
+            parts.append("攻略")
+        elif kind == "mechanic":
+            parts.append("机制")
         elif kind == "character":
             parts.append("角色")
         detail = " · ".join(part for part in parts if part)
@@ -531,6 +587,8 @@ class SpireCodexService:
             # Glossary terms are listed on the reference page; there is no
             # per-term frontend route.
             return f"{self.base}/zhs/reference"
+        if kind == "mechanic":
+            return f"{self.base}/zhs/mechanics/{str(key).lower()}"
         return f"{self.base}/zhs/{PATHS[kind]}/{str(key).lower()}"
 
     def _image_url(self, kind, entity):
@@ -554,6 +612,14 @@ class SpireCodexService:
         )
         if not isinstance(data, list):
             raise WikiError("invalid_response", "Spire Codex 列表格式异常。")
+        # Mechanics list entries use slug instead of id; normalize so page_id
+        # resolution and detail URLs share one key.
+        data = [
+            {**item, "id": item.get("id") or item.get("slug") or ""}
+            if isinstance(item, dict)
+            else item
+            for item in data
+        ]
         self._indexes[key] = data
         return data
 
@@ -569,7 +635,11 @@ class SpireCodexService:
         data = await self.client.get(
             f"/api/{PATHS[kind]}/{str(key).lower()}", {"lang": "zhs"}, self.page_ttl
         )
-        return data if isinstance(data, dict) else None
+        if not isinstance(data, dict):
+            return None
+        if not data.get("id") and data.get("slug"):
+            data = {**data, "id": data["slug"]}
+        return data
 
     async def _read(self, page_id, question, section):
         await self._version()
@@ -614,10 +684,11 @@ class SpireCodexService:
             word in question + section for word in COMMUNITY_WORDS
         ):
             await self._community_sections(kind, entity, add)
-        title = entity.get("name") or entity.get("id") or "未知条目"
-        url = self._url(kind, entity.get("id", ""))
-        page_id = entry_id(kind, entity.get("id", ""))
-        self._known[page_id] = (kind, str(entity.get("id", "")))
+        key = str(entity.get("id") or entity.get("slug") or "")
+        title = entity.get("name") or entity.get("title") or key or "未知条目"
+        url = self._url(kind, key)
+        page_id = entry_id(kind, key)
+        self._known[page_id] = (kind, key)
         snippets, truncated, selection = evidence(
             sections,
             question,
@@ -756,6 +827,10 @@ class SpireCodexService:
             self._encounter_sections(entity, add)
         elif kind == "power":
             self._power_sections(entity, add)
+        elif kind == "guide":
+            self._guide_sections(entity, add)
+        elif kind == "mechanic":
+            self._mechanic_sections(entity, add)
         else:
             self._generic_sections(kind, entity, add)
 
@@ -1104,6 +1179,44 @@ class SpireCodexService:
         desc = effect_text(entity)
         if desc:
             add("效果", [desc])
+
+    def _guide_sections(self, entity, add):
+        info = []
+        for field, label in (
+            ("author", "作者"),
+            ("date", "日期"),
+            ("category", "分类"),
+            ("difficulty", "难度"),
+        ):
+            if entity.get(field):
+                info.append(f"{label}：{entity[field]}")
+        if entity.get("tags"):
+            info.append("标签：" + "、".join(entity["tags"]))
+        summary = clean(entity.get("summary") or "")
+        if summary:
+            info.append(summary)
+        add("基本信息", info)
+        if summary:
+            add("摘要", [summary])
+        body = _markdown_text(entity.get("content") or "")
+        if body:
+            add("正文", [body])
+
+    def _mechanic_sections(self, entity, add):
+        info = []
+        if entity.get("category"):
+            info.append(f"分类：{entity['category']}")
+        if entity.get("order") is not None:
+            info.append(f"顺序：{entity['order']}")
+        description = clean(entity.get("description") or "")
+        if description:
+            info.append(description)
+        add("基本信息", info)
+        if description:
+            add("摘要", [description])
+        body = _markdown_text(entity.get("body_markdown") or "")
+        if body:
+            add("正文", [body])
 
     def _generic_sections(self, kind, entity, add):
         info = []

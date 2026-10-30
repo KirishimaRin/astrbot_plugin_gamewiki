@@ -109,7 +109,71 @@ ORBS = [
         "image_url": "/static/images/orbs/dark_orb.png",
     }
 ]
+GUIDES = [
+    {
+        "id": "boss-guide",
+        "slug": "boss-guide",
+        "title": "Boss Guide: Every Boss Ranked by Deadliness",
+        "author": "Spire Codex",
+        "date": "2026-07-16",
+        "category": "general",
+        "tags": ["bosses", "strategy"],
+        "summary": "Every boss ranked by how many runs it ends.",
+        "difficulty": "intermediate",
+        "content": "## Act 1\n\nWatch [[relic:Burning Blood]] and [the tier list](https://example.test).",
+    }
+]
+MECHANICS = [
+    {
+        "slug": "combat-mechanics",
+        "title": "Combat Mechanics",
+        "description": "Hand size, energy, block decay and damage formulas.",
+        "category": "mechanics",
+        "order": 9,
+        "body_markdown": "## Attack\n\n**Strength** adds damage.\n\n| Effect | Per stack |\n|---|---|\n| Strength | +1 |",
+    }
+]
 SEARCH = {
+    "guide": {
+        "query": "guide",
+        "categories": [
+            {
+                "kind": "guide",
+                "items": [
+                    {
+                        "name": "Boss Guide: Every Boss Ranked by Deadliness",
+                        "path": "/guides/boss-guide",
+                        "subtitle": "general",
+                    }
+                ],
+            },
+            {
+                "kind": "mechanics",
+                "items": [
+                    {
+                        "name": "Combat Mechanics",
+                        "path": "/mechanics/combat-mechanics",
+                        "subtitle": "mechanics",
+                    }
+                ],
+            },
+        ],
+    },
+    "mechanics": {
+        "query": "mechanics",
+        "categories": [
+            {
+                "kind": "mechanics",
+                "items": [
+                    {
+                        "name": "Combat Mechanics",
+                        "path": "/mechanics/combat-mechanics",
+                        "subtitle": "mechanics",
+                    }
+                ],
+            }
+        ],
+    },
     "格挡": {
         "query": "格挡",
         "categories": [
@@ -206,7 +270,9 @@ def make_service(tmp_path, calls=None):
         if path == "/api/search":
             q, lang = params.get("q"), params.get("lang")
             payload = SEARCH.get(q)
-            if payload is not None and (lang == "zhs" or q == "Bash"):
+            if payload is not None and (
+                lang == "zhs" or q in {"Bash", "guide", "mechanics"}
+            ):
                 return httpx.Response(200, json=payload)
             return httpx.Response(200, json={"query": q, "categories": []})
         if path == "/api/changelogs":
@@ -282,6 +348,14 @@ def make_service(tmp_path, calls=None):
             return httpx.Response(
                 200, json={"INFLAME": {"win_rate": 43.6, "picks": 100, "score": 80}}
             )
+        if path == "/api/guides":
+            return httpx.Response(200, json=GUIDES)
+        if path == "/api/guides/boss-guide":
+            return httpx.Response(200, json=GUIDES[0])
+        if path == "/api/mechanics/sections":
+            return httpx.Response(200, json=MECHANICS)
+        if path == "/api/mechanics/sections/combat-mechanics":
+            return httpx.Response(200, json=MECHANICS[0])
         return httpx.Response(404, json={"detail": "Not Found"})
 
     client = SpireCodexClient(
@@ -480,6 +554,48 @@ def test_community_sections_are_fetched_for_recommendation_questions(tmp_path):
             await client.close()
 
     asyncio.run(run())
+
+
+def test_guide_question_returns_guide_and_mechanics(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            search = await service.search("攻略", "")
+            return search, await service.read(
+                search["candidates"][0]["page_id"], "攻略"
+            )
+        finally:
+            await client.close()
+
+    search, result = asyncio.run(run())
+    assert search["status"] == "needs_choice"
+    titles = [item["title"] for item in search["candidates"]]
+    assert any("Boss Guide" in title for title in titles)
+    assert any("Combat Mechanics" in title for title in titles)
+    assert result["status"] == "ok"
+    assert "正文" in result["available_sections"]
+    text = "\n".join(item["text"] for item in result["evidence"])
+    assert "Burning Blood" in text
+    assert "[[" not in text and "##" not in text
+    assert result["url"].endswith("/zhs/guides/boss-guide")
+
+
+def test_mechanic_markdown_is_flattened(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            return await service.read(entry_id("mechanic", "combat-mechanics"), "机制")
+        finally:
+            await client.close()
+
+    result = asyncio.run(run())
+    assert result["status"] == "ok"
+    assert result["url"].endswith("/zhs/mechanics/combat-mechanics")
+    text = "\n".join(item["text"] for item in result["evidence"])
+    assert "Strength adds damage" in text
+    assert "**" not in text and "##" not in text
 
 
 def test_glossary_reference_falls_back_to_term(tmp_path):
