@@ -16,6 +16,7 @@ wiki/query.py            搜索、候选重排、重定向与查询编排
 wiki/sources.py          PRTS/AKEData 优先、BWIKI 回退与来源固定
 wiki/akedata.py          终末地公开版本数据表、中文文本与分节证据适配
 wiki/spirecodex.py       杀戮尖塔2 Spire Codex REST 实体、分节证据与同名消歧
+wiki/chineseguides.py    杀戮尖塔2 STS2.INFO/STS2FRONT 中文机制与攻略 HTML 适配
 wiki/images.py           AKEData 立绘有界下载、压缩与临时文件清理
 wiki/prts.py             PRTS 页面结构与干员元数据适配
 wiki/assistant.py        命令意图解析与概览协调（每命令至多两次模型调用）
@@ -51,7 +52,11 @@ GitHub Actions 在 Python 3.10、3.11、3.12、3.14 上执行格式检查、静�
 ```bash
 python scripts/smoke.py
 python scripts/audit_categories.py
+python scripts/smoke_sts2.py
+python scripts/audit_sts2_queries.py --strict
 ```
+
+`smoke_sts2.py` 只使用 Spire Codex 的稳定结构化接口；`audit_sts2_queries.py` 覆盖中文攻略/机制等 47 条用户问法，中文源超时会回退英文，因此本地门禁默认按 80% 阈值判断，完整中文覆盖需在源站可用时另行验收。
 
 smoke 脚本只读访问原神 BWIKI；跨游戏 audit 读取明日方舟 PRTS 和其余游戏 BWIKI，尚不覆盖 AKEData 主源。测试昵称、突破总量、指定技能等级、书籍、七圣召唤和不存在词。输出存入本地 `research/live-smoke.json`，该目录不提交到 Git。断言是结构性的：检查正确形状的行/分节存在（如 `点按伤害 | 百分比`），不校验具体数值；BWIKI 编辑者正常调整数值不会误报，站点结构或模板变化才会使断言失败。确因站点改版需要更新时，修改 `scripts/smoke.py` 的 `PATTERNS` 与 `scripts/audit_categories.py` 的 `CASES`，并先在真实页面确认。
 
