@@ -142,6 +142,77 @@ MECHANICS = [
         "body_markdown": "## Attack\n\n**Strength** adds damage.\n\n| Effect | Per stack |\n|---|---|\n| Strength | +1 |",
     }
 ]
+ASCENSIONS = [
+    {
+        "id": "LEVEL_10",
+        "level": 10,
+        "name": "双重Boss",
+        "description": "在第3幕末尾与两名首领战斗。",
+    }
+]
+ACTS = [
+    {
+        "id": "OVERGROWTH",
+        "name": "密林",
+        "index": 0,
+        "num_rooms": 15,
+        "bosses": ["WRIGGLER"],
+        "ancients": ["NEOW"],
+        "events": ["ABYSSAL_BATHS"],
+        "encounters": ["SLIMES_NORMAL", "ELITE_NORMAL"],
+    }
+]
+ACHIEVEMENTS = [
+    {
+        "id": "ALL_CARDS_UPGRADED",
+        "name": "完美牌组",
+        "description": "以全部升级的牌组赢得一局游戏。",
+        "category": "run",
+        "character": None,
+        "threshold": None,
+        "condition": "Win with a fully-upgraded deck",
+    }
+]
+UNLOCKS = {
+    "characters": [
+        {
+            "id": "SILENT",
+            "name": "静默猎手",
+            "epoch_id": "SILENT1_EPOCH",
+            "epoch_title": "迷雾压境",
+            "era": "门扉",
+            "unlock_info": "以铁甲战士完成一局游戏来揭示这个历史节点。",
+        }
+    ]
+}
+ENCOUNTERS = [
+    {
+        "id": "SLIMES_NORMAL",
+        "name": "一大群史莱姆",
+        "room_type": "Monster",
+        "is_weak": False,
+        "act": "Act 1 - Overgrowth",
+    },
+    {
+        "id": "ELITE_NORMAL",
+        "name": "密林精英",
+        "room_type": "Elite",
+        "is_weak": False,
+        "act": "Act 1 - Overgrowth",
+    },
+]
+MONSTERS = [
+    {"id": "WRIGGLER", "name": "扭动虫", "type": "Elite", "min_hp": 10, "max_hp": 12}
+]
+EVENTS = [
+    {
+        "id": "ABYSSAL_BATHS",
+        "name": "深渊浴场",
+        "description": "池水灼烧。",
+        "options": [],
+        "pages": [],
+    }
+]
 SEARCH = {
     "guide": {
         "query": "guide",
@@ -425,9 +496,32 @@ def make_service(tmp_path, calls=None):
                             "share": 23.0,
                             "runs": 517627,
                         }
-                    ]
+                    ],
+                    "by_ascension": [
+                        {
+                            "ascension": 10,
+                            "runs": 635753,
+                            "wins": 134403,
+                            "abandoned": 58810,
+                            "win_rate": 21.1,
+                        }
+                    ],
                 },
             )
+        if path == "/api/ascensions":
+            return httpx.Response(200, json=ASCENSIONS)
+        if path == "/api/acts":
+            return httpx.Response(200, json=ACTS)
+        if path == "/api/achievements":
+            return httpx.Response(200, json=ACHIEVEMENTS)
+        if path == "/api/unlocks":
+            return httpx.Response(200, json=UNLOCKS)
+        if path == "/api/monsters":
+            return httpx.Response(200, json=MONSTERS)
+        if path == "/api/encounters":
+            return httpx.Response(200, json=ENCOUNTERS)
+        if path == "/api/events":
+            return httpx.Response(200, json=EVENTS)
         if path == "/api/guides":
             return httpx.Response(200, json=GUIDES)
         if path == "/api/guides/boss-guide":
@@ -792,3 +886,32 @@ def test_format_compare_renders_data_and_sources(tmp_path):
     assert "【对比】燃烧之血 vs 红头骨" in text
     assert "稀有度" in text and "｜" in text
     assert "社区数据" in text and "来源" in text
+
+
+def test_meta_ascension_achievement_unlock_and_act(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            ascension = await service.search("A10", "")
+            achievement = await service.search("成就", "")
+            unlock = await service.search("怎么解锁静默猎手", "")
+            act = await service.search("第一章有什么精英", "")
+            return ascension, achievement, unlock, act
+        finally:
+            await client.close()
+
+    ascension, achievement, unlock, act = asyncio.run(run())
+    assert ascension["status"] == "ok"
+    assert ascension["title"] == "进阶10 双重Boss"
+    assert "社区胜率" in ascension["available_sections"]
+    assert achievement["status"] == "ok"
+    assert "成就列表" in achievement["available_sections"]
+    assert "完美牌组" in "\n".join(item["text"] for item in achievement["evidence"])
+    assert unlock["status"] == "ok"
+    assert "解锁条件" in unlock["available_sections"]
+    assert "铁甲战士" in "\n".join(item["text"] for item in unlock["evidence"])
+    assert act["status"] == "ok"
+    assert act["title"] == "密林"
+    assert "BOSS" in act["available_sections"]
+    assert "精英" in act["available_sections"]

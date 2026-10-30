@@ -40,6 +40,10 @@ PATHS = {
     "glossary": "glossary",
     "guide": "guides",
     "mechanic": "mechanics/sections",
+    "ascension": "ascensions",
+    "act": "acts",
+    "achievement": "achievements",
+    "unlock": "unlocks",
 }
 
 # /api/search names the mechanics category "mechanics"; the adapter uses the
@@ -639,6 +643,70 @@ class SpireCodexService:
             pass
         return metrics
 
+    async def _unlock_index(self):
+        data = await self.client.get("/api/unlocks", {"lang": "zhs"}, self.page_ttl)
+        items = []
+        if isinstance(data, dict):
+            for category, rows in data.items():
+                if not isinstance(rows, list):
+                    continue
+                for row in rows:
+                    if isinstance(row, dict):
+                        items.append({**row, "category": category})
+        return items
+
+    @staticmethod
+    def _act_from_text(text):
+        words = (
+            (0, ("第一章", "第一幕", "密林", "overgrowth")),
+            (1, ("第二章", "第二幕", "暗港", "underdocks")),
+            (2, ("第三章", "第三幕", "蜂巢", "hive")),
+            (3, ("第四章", "第四幕", "荣耀", "glory")),
+        )
+        lowered = text.casefold()
+        for index, names in words:
+            if any(name.casefold() in lowered for name in names):
+                return index
+        return None
+
+    async def _meta_result(self, query, question):
+        text = f"{query} {question}"
+        match = re.search(r"进阶\s*(\d{1,2})", text)
+        if match:
+            level = int(match.group(1))
+            items = await self._index("ascension", "zhs")
+            item = next((entry for entry in items if entry.get("level") == level), None)
+            if item is not None:
+                item = {
+                    **item,
+                    "name": f"进阶{level} {item.get('name', '')}".strip(),
+                }
+                return await self._entry("ascension", item, question, "")
+        if "成就" in text:
+            items = await self._index("achievement", "zhs")
+            if items:
+                return await self._entry(
+                    "achievement",
+                    {"id": "ALL", "title": "成就列表", "achievements": items},
+                    question,
+                    "",
+                )
+        if "解锁" in text:
+            for item in await self._unlock_index():
+                name = str(item.get("name", ""))
+                if name and name in text:
+                    return await self._entry("unlock", item, question, "")
+        act_intent = any(word in text for word in ("章", "幕", "精英", "BOSS", "boss"))
+        act_index = self._act_from_text(text) if act_intent else None
+        if act_index is not None:
+            items = await self._index("act", "zhs")
+            item = next(
+                (entry for entry in items if entry.get("index") == act_index), None
+            )
+            if item is not None:
+                return await self._entry("act", item, question, "")
+        return None
+
     async def _search(self, query, question):
         version = await self._version()
         original = query
@@ -677,6 +745,10 @@ class SpireCodexService:
             exact = await self._term_exact(wanted, hint)
             if exact and not items:
                 items = exact
+        if not exact:
+            meta = await self._meta_result(normalized, question)
+            if meta:
+                return {**meta, **base}
         concept = any(word in f"{normalized} {question}" for word in CONCEPT_WORDS)
         if not exact and (not items or concept):
             # Prefer Chinese editorial content for concept/guide questions;
@@ -963,6 +1035,8 @@ class SpireCodexService:
             return f"{self.base}/zhs/reference"
         if kind == "mechanic":
             return f"{self.base}/zhs/mechanics/{str(key).lower()}"
+        if kind == "unlock" or (kind == "achievement" and str(key) == "ALL"):
+            return f"{self.base}/zhs/unlocks"
         return f"{self.base}/zhs/{PATHS[kind]}/{str(key).lower()}"
 
     def _image_url(self, kind, entity):
@@ -1008,6 +1082,17 @@ class SpireCodexService:
     async def _detail(self, kind, key):
         if str(key).startswith("cn:") and self.chinese is not None:
             return await self.chinese.read(str(key))
+        if kind == "unlock":
+            items = await self._unlock_index()
+            return next(
+                (item for item in items if str(item.get("id")) == str(key)), None
+            )
+        if kind == "achievement" and str(key) == "ALL":
+            return {
+                "id": "ALL",
+                "title": "成就列表",
+                "achievements": await self._index("achievement", "zhs"),
+            }
         data = await self.client.get(
             f"/api/{PATHS[kind]}/{str(key).lower()}", {"lang": "zhs"}, self.page_ttl
         )
@@ -1079,6 +1164,15 @@ class SpireCodexService:
                     "攻略",
                     [guide["title"], text[:1500] + ("…" if len(text) > 1500 else "")],
                 )
+        if kind == "character" and "解锁" in guide_text:
+            try:
+                unlocks = await self._unlock_index()
+            except WikiError:
+                unlocks = []
+            name = entity.get("name", "")
+            item = next((row for row in unlocks if row.get("name") == name), None)
+            if item is not None:
+                add("解锁条件", [clean(item.get("unlock_info") or "")])
         if kind in PAIRING_TYPES and any(
             word in question + section for word in COMMUNITY_WORDS
         ):
@@ -1230,6 +1324,14 @@ class SpireCodexService:
             self._guide_sections(entity, add)
         elif kind == "mechanic":
             self._mechanic_sections(entity, add)
+        elif kind == "ascension":
+            await self._ascension_sections(entity, add)
+        elif kind == "act":
+            await self._act_sections(entity, add)
+        elif kind == "achievement":
+            self._achievement_sections(entity, add)
+        elif kind == "unlock":
+            self._unlock_sections(entity, add)
         else:
             self._generic_sections(kind, entity, add)
 
@@ -1578,6 +1680,109 @@ class SpireCodexService:
         desc = effect_text(entity)
         if desc:
             add("效果", [desc])
+
+    async def _ascension_sections(self, entity, add):
+        description = clean(entity.get("description") or "")
+        add(
+            "基本信息",
+            [
+                f"等级：{entity.get('level', '未知')}",
+                f"名称：{entity.get('name', '')}",
+                description,
+            ],
+        )
+        if description:
+            add("效果", [description])
+        try:
+            stats = await self.client.get(
+                "/api/runs/community-stats", {}, self.page_ttl
+            )
+        except WikiError:
+            stats = {}
+        rows = stats.get("by_ascension") if isinstance(stats, dict) else []
+        row = next(
+            (
+                item
+                for item in rows or []
+                if item.get("ascension") == entity.get("level")
+            ),
+            None,
+        )
+        if isinstance(row, dict):
+            add(
+                "社区胜率",
+                [
+                    f"胜率 {row.get('win_rate', '?')}%，"
+                    f"{row.get('runs', '?')} 局，弃局 {row.get('abandoned', '?')}。"
+                ],
+            )
+
+    async def _act_sections(self, entity, add):
+        add(
+            "基本信息",
+            [
+                f"名称：{entity.get('name', '')}",
+                f"第{int(entity.get('index', 0)) + 1}幕",
+                f"房间数：{entity.get('num_rooms', '?')}",
+            ],
+        )
+        bosses = await self._names("monster", entity.get("bosses") or [])
+        if bosses:
+            add("BOSS", bosses)
+        encounters = await self._index("encounter", "zhs")
+        wanted = set(entity.get("encounters") or [])
+        elites = [
+            item.get("name", "")
+            for item in encounters
+            if item.get("id") in wanted and item.get("room_type") == "Elite"
+        ]
+        if elites:
+            add("精英", elites)
+        events = await self._names("event", entity.get("events") or [])
+        if events:
+            add("事件", events)
+
+    def _achievement_sections(self, entity, add):
+        items = entity.get("achievements")
+        if isinstance(items, list):
+            add(
+                "成就列表",
+                [
+                    f"{item.get('name', '')}：{clean(item.get('description') or '')}"
+                    for item in items
+                ],
+            )
+            return
+        info = []
+        for field, label in (
+            ("category", "分类"),
+            ("character", "角色"),
+            ("threshold", "阈值"),
+        ):
+            if entity.get(field):
+                info.append(f"{label}：{entity[field]}")
+        add("基本信息", info)
+        description = clean(entity.get("description") or "")
+        if description:
+            add("条件", [description])
+        condition = clean(entity.get("condition") or "")
+        if condition:
+            add("备注", [condition])
+
+    def _unlock_sections(self, entity, add):
+        info = []
+        for field, label in (
+            ("name", "名称"),
+            ("category", "类别"),
+            ("epoch_title", "纪元"),
+            ("era", "时代"),
+        ):
+            if entity.get(field):
+                info.append(f"{label}：{entity[field]}")
+        unlock = clean(entity.get("unlock_info") or "")
+        add("基本信息", [*info, unlock])
+        if unlock:
+            add("解锁条件", [unlock])
 
     def _guide_sections(self, entity, add):
         info = []

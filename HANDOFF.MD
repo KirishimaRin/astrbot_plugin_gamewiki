@@ -145,7 +145,7 @@
 - 搜索会命中描述且同名实体多：`search` 必须精确名称优先；同名候选带角色/类型标签，并设置 `choice_intro`，不能沿用“没有同名条目”的默认文案。
 - BBCode：`clean()` 把 `[energy:N]` 转 `N费`、空强调对 `[blue][/blue]` 转 `X`；能力 `description` 可能丢数值，`effect_text` 先 `description` 后 `description_raw`。不要把 `[gold]` 等标签原样送进卡片或模型。
 - `_tool_read` 对 sts2 单独处理：source 留空或 `spirecodex`；不要走 `read_from_source`（它只认 bwiki 且会拒绝其他游戏）。
-- 验证：`pytest -q` 391 passed；Ruff 通过；framework 4.5.7/4.29.3 通过；package 35 files/11,121,539 bytes；真实 API 冒烟覆盖遗物、同名卡、怪物、事件分支、角色初始卡组、出招顺序、能力、术语、充能球、搭配、胜率、攻略、机制、中文伤害/进阶查询与同类型对比。
+- 验证：`pytest -q` 392 passed；Ruff 通过；framework 4.5.7/4.29.3 通过；package 35 files/11,123,719 bytes；真实 API 冒烟 21/21 覆盖遗物、同名卡、怪物、事件分支、角色初始卡组、出招顺序、能力、术语、充能球、搭配、胜率、攻略、机制、中文伤害/进阶、进阶等级、成就、解锁、章节精英与同类型对比。
 - 尚无备用源；Spire Codex 故障时只能明确报错。未改版本号。
 
 ## 杀戮尖塔2 计划内增强（2026-10-30）
@@ -182,3 +182,11 @@
 - C 层只在问题含“为什么/怎么选/适合/值得/推荐/理由”时调用模型，prompt 要求只使用给出的字段和效果、不编造联动/数值、最多 200 字；模型失败保留 B 层结果并记 fallback。
 - `A10和N10` 归一后相同，助手直接回答“同一条目/等级”，不调用 compare；STS2 的“有什么区别”走对比，其他游戏仍保留原分开查询提示。
 - `wiki_compare` 工具目前只支持 `game=sts2`，参数 `query_a/query_b/question/game`；框架契约检查已通过 4.5.7 与 4.29.3。
+
+## 杀戮尖塔2 进度/Meta 查询（2026-10-30）
+
+- 新增 `ascension/act/achievement/unlock` 四类：进阶按 `level` 精确匹配，章节按“第X章/幕/精英/BOSS”触发，成就返回全部成就列表，解锁按 `/api/unlocks` 分类展平后按角色名匹配。
+- `_meta_result` 只在没有精确实体时运行；`第一章有什么精英` 需要同时出现章节词与精英/BOSS/幕，避免裸“荣耀/密林”被误判成章节。
+- 解锁/成就列表的完整信息同时放进 `基本信息`，因为裸名称查询的 evidence 默认只取第一段；`解锁条件` 仍保留为独立分节供追问。
+- `wiki_read` 的 `page_id` 对 `achievement=ALL` 和 `unlock` 做特殊解析；`unlock` 链接指向 `/zhs/timeline`，其余进阶/章节/成就使用实体页。
+- 本轮仍复用 `SpireCodexService` 的 `Section/evidence` 契约，没有新增工具；`wiki_compare` 与 `wiki_search/read` 继续并行。
