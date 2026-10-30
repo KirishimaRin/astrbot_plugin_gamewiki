@@ -1092,7 +1092,7 @@ def test_community_meta_queries(tmp_path):
     assert rest["status"] == "ok" and "篝火选择" in rest["available_sections"]
     assert "锻造" in "\n".join(item["text"] for item in rest["evidence"])
     assert removed["status"] == "ok" and "最常删除" in removed["available_sections"]
-    assert "Strike" in "\n".join(item["text"] for item in removed["evidence"])
+    assert "打击" in "\n".join(item["text"] for item in removed["evidence"])
     assert ancient["status"] == "ok" and "先古选取" in ancient["available_sections"]
     assert "Arcane Scroll" in "\n".join(item["text"] for item in ancient["evidence"])
     assert skip["status"] == "ok" and "28.5" in "\n".join(

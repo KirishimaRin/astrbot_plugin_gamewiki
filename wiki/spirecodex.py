@@ -265,6 +265,7 @@ REST_NAMES = {
     "Lift": "举重",
     "Cook": "烹饪",
 }
+GENERIC_CARD_NAMES = {"STRIKE": "打击", "DEFEND": "防御"}
 STACK_TYPES = {"Counter": "可叠加", "Single": "不可叠加"}
 GLOSSARY_CATEGORIES = {
     "combat": "战斗",
@@ -1345,10 +1346,17 @@ class SpireCodexService:
         for snippet in snippets:
             snippet.pop("anchor", None)
             snippet["url"] = url
+        source_label = "杀戮尖塔2 Spire Codex"
+        if key.startswith("cn:guide:sts2info:") or key.startswith(
+            "cn:mechanic:sts2info:"
+        ):
+            source_label = "杀戮尖塔2 STS2.INFO"
+        elif key.startswith("cn:guide:sts2front:"):
+            source_label = "杀戮尖塔2 STS2FRONT"
         return {
             "status": "ok" if snippets else "section_not_found",
             "game": "sts2",
-            "source": "杀戮尖塔2 Spire Codex",
+            "source": source_label,
             "source_key": "spirecodex",
             "title": title,
             "page_id": page_id,
@@ -2171,14 +2179,14 @@ class SpireCodexService:
                 if isinstance(item, dict)
             ]
             names = await self._names("card", [item.get("id") for item in rows])
-            add(
-                "最常删除",
-                [
-                    f"{names[index] if names[index] != item.get('id') else item.get('name')}"
-                    f"：{item.get('pct')}%"
-                    for index, item in enumerate(rows)
-                ],
-            )
+            lines = []
+            for index, item in enumerate(rows):
+                name = (
+                    names[index] if names[index] != item.get("id") else item.get("name")
+                )
+                name = GENERIC_CARD_NAMES.get(str(item.get("id")), name)
+                lines.append(f"{name}：{item.get('pct')}%")
+            add("最常删除", lines)
         elif metric == "skip":
             rate = data.get("reward_skip_rate")
             if rate is not None:
