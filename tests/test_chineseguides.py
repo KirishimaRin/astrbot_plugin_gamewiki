@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 
 import httpx
+import pytest
 
 from wiki.cache import Cache
 from wiki.chineseguides import ChineseGuideService
@@ -234,3 +235,27 @@ def test_service_uses_chinese_mechanics_and_character_guide():
     )
     assert "攻略" in character["available_sections"]
     assert "奇巧" in "\n".join(item["text"] for item in character["evidence"])
+
+
+def test_chinese_source_honors_429_cooldown(tmp_path):
+    calls = []
+
+    def handler(request):
+        calls.append(str(request.url))
+        return httpx.Response(429, headers={"Retry-After": "30"})
+
+    service = ChineseGuideService(
+        Cache(Path(tmp_path)), timeout=2, transport=httpx.MockTransport(handler)
+    )
+
+    async def run():
+        try:
+            with pytest.raises(httpx.HTTPError):
+                await service.mechanics("机制")
+            with pytest.raises(httpx.HTTPError):
+                await service.mechanics("机制")
+        finally:
+            await service.close()
+
+    asyncio.run(run())
+    assert len(calls) == 1

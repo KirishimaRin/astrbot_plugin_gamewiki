@@ -1171,3 +1171,27 @@ def test_wiki_compare_tool_only_supports_sts2(plugin):
         asyncio.run(instance.wiki_compare(Event(), "草神", "钟离", "", "ys"))
     )
     assert unsupported["code"] == "unsupported"
+
+
+def test_sts2_image_send_requests_webp_conversion(plugin):
+    import contextlib
+
+    instance, Event, module = plugin
+    seen = {}
+
+    @contextlib.asynccontextmanager
+    async def fake_image(url, cache=None, **kwargs):
+        seen.update(kwargs)
+        yield "/tmp/sts2-image.jpg"
+
+    event = Event("")
+    event.image_result = lambda path: ("image", path)
+    with patch.object(module, "prepared_image", fake_image):
+        asyncio.run(
+            instance._send_entry_image(
+                event,
+                "https://cdn.spire-codex.com/cards-full/stable/test.webp",
+                convert_webp=True,
+            )
+        )
+    assert seen.get("convert_webp") is True

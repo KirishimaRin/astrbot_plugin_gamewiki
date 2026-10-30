@@ -9,6 +9,7 @@ parsed and cached; a missing or changed page falls back to Spire Codex.
 import asyncio
 import hashlib
 import re
+import time
 from urllib.parse import quote, unquote
 
 import httpx
@@ -139,6 +140,7 @@ class ChineseGuideService:
         self._pace = asyncio.Lock()
         self._next_request = 0.0
         self._pace_seconds = 0.4
+        self._blocked: dict[str, float] = {}
 
     async def close(self):
         await self.http.aclose()
@@ -150,11 +152,21 @@ class ChineseGuideService:
                 await asyncio.sleep(delay)
             self._next_request = asyncio.get_running_loop().time() + self._pace_seconds
 
+    @staticmethod
+    def _retry_after(header: str) -> float:
+        try:
+            return max(1.0, min(300.0, float(header)))
+        except (TypeError, ValueError):
+            return 30.0
+
     async def _get(self, url: str, ttl: float, parser):
         key = "chineseguide:" + hashlib.sha256(url.encode()).hexdigest()
         saved = await self.cache.get(key)
         if isinstance(saved, dict) and "data" in saved:
             return saved["data"]
+        host = httpx.URL(url).host
+        if self._blocked.get(host, 0.0) > time.monotonic():
+            raise httpx.ConnectError(f"{host} 正在冷却")
         for attempt in range(2):
             await self._wait()
             try:
@@ -166,6 +178,12 @@ class ChineseGuideService:
                     raise
                 await asyncio.sleep(0.5)
             except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 429:
+                    delay = self._retry_after(
+                        exc.response.headers.get("Retry-After", "30")
+                    )
+                    self._blocked[host] = time.monotonic() + delay
+                    raise
                 if exc.response.status_code < 500 or attempt == 1:
                     raise
                 await asyncio.sleep(0.5)
