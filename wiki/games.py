@@ -415,6 +415,56 @@ ZMD = GameProfile(
     accent=(196, 148, 38),
 )
 
+STS2 = GameProfile(
+    code="sts2",
+    name="杀戮尖塔2",
+    command="sts2",
+    # Spire Codex 的实体不是角色/武器，而是卡牌、遗物、药水、怪物、事件和
+    # 角色。分节名由 SpireCodexService 生成，intents 只负责把问题词映射到
+    # 这些分节；不要在这里放“生命”“角色”这类容易出现在条目名里的单字。
+    intents=(
+        (("费用", "耗能", "能量", "星费"), ("基本信息",), ()),
+        (("伤害", "格挡", "抽牌", "数值", "倍率"), ("数值", "效果"), ()),
+        (("效果", "作用", "干嘛", "做什么"), ("效果",), ()),
+        (("升级", "强化"), ("升级后",), ()),
+        (("招式", "意图", "技能"), ("招式",), ()),
+        (("出现", "遭遇", "哪个幕", "幕"), ("出现遭遇", "基本信息"), ()),
+        (("选项", "选择", "前置", "条件"), ("选项", "基本信息"), ()),
+        (("初始", "起始", "开局"), ("基本信息", "初始遗物", "初始卡组"), ()),
+        (("解锁",), ("解锁条件",), ()),
+        (("获取", "获得", "来源"), ("基本信息",), ()),
+        (("血量", "生命值", "HP", "hp"), ("基本信息",), ()),
+        (("稀有度", "类型", "关键词"), ("基本信息",), ()),
+    ),
+    specifics=(
+        (("费用", "耗能", "能量"), "基本信息"),
+        (("伤害", "格挡", "抽牌", "数值"), "数值"),
+        (("升级", "强化"), "升级后"),
+        (("招式", "意图", "技能"), "招式"),
+        (("出现", "遭遇", "幕"), "出现遭遇"),
+        (("选项", "选择"), "选项"),
+        (("前置", "条件"), "基本信息"),
+        (("初始", "起始", "开局"), ("基本信息", "初始遗物", "初始卡组")),
+        (("解锁",), "解锁条件"),
+        (("获取", "获得", "来源"), "基本信息"),
+        (("血量", "生命值", "HP", "hp"), "基本信息"),
+        (("稀有度", "类型", "关键词"), "基本信息"),
+        (("效果", "作用"), "效果"),
+    ),
+    # 这些是精确昵称，不走 normalize_slang 的子串替换，避免“铁甲战士”
+    # 被“战士”二次改写。
+    site_aliases={
+        "战士": "铁甲战士",
+        "铁甲": "铁甲战士",
+        "猎人": "静默猎手",
+        "机器人": "故障机器人",
+        "死灵": "亡灵契约师",
+        "死灵法师": "亡灵契约师",
+        "摄政王": "储君",
+    },
+    accent=(170, 52, 44),
+)
+
 # Aspect words shared by every game. The question splitter in assistant.py
 # builds its vocabulary from here plus the per-game intents, so a new aspect
 # word teaches intent parsing for all games at once and cannot drift from
@@ -456,7 +506,7 @@ GENERIC_ASPECTS = (
     "年龄",
 )
 
-PROFILES = {p.code: p for p in (YS, SR, ZZZ, ARKNIGHTS, ZMD)}
+PROFILES = {p.code: p for p in (YS, SR, ZZZ, ARKNIGHTS, ZMD, STS2)}
 
 # Game-name heads users prepend ("原神纳西妲是谁"); they are context, never
 # the entity, so local parsing peels them before splitting a question.
@@ -466,6 +516,7 @@ GAME_WORDS = {
     "zzz": ("绝区零",),
     "arknights": ("明日方舟", "方舟"),
     "zmd": ("明日方舟:终末地", "明日方舟", "终末地"),
+    "sts2": ("杀戮尖塔2", "尖塔2", "STS2", "sts2", "杀戮尖塔"),
 }
 
 
@@ -528,6 +579,8 @@ def api_url(code: str) -> str:
 
 
 def default_source(code: str) -> str:
+    if code == "sts2":
+        return "spirecodex"
     return "prts" if code == "arknights" else "bwiki"
 
 
@@ -536,6 +589,8 @@ def source_api(code: str, source: str) -> str:
         return "https://data.akedata.wiki/manifest.json"
     if source == "prts" and code == "arknights":
         return "https://prts.wiki/api.php"
+    if source == "spirecodex" and code == "sts2":
+        return "https://spire-codex.com"
     if source == "bwiki" and code in PROFILES:
         return f"https://wiki.biligame.com/{code}/api.php"
     raise ValueError("Unsupported wiki source")

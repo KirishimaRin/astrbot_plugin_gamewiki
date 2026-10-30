@@ -30,10 +30,11 @@ def format_command(
             )
             for index, item in enumerate(result["candidates"][:5], 1)
         )
-        reply = (
+        intro = result.get("choice_intro") or (
             f"没有与「{query}」同名的条目，以下是搜索到的相关条目，"
-            "请确认后使用完整名称重新查询：\n\n" + choices
+            "请确认后使用完整名称重新查询："
         )
+        reply = intro + "\n\n" + choices
         if result.get("suggestion_used"):
             reply += (
                 f"\n\n已尝试纠错关键词「{result['suggestion_used']}」，请确认目标条目。"

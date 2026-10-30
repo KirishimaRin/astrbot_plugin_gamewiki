@@ -23,6 +23,7 @@ from .wiki.models import WikiError
 from .wiki.query import QueryService
 from .wiki.sources import ArknightsSources, EndfieldSources
 from .wiki.akedata import AkeClient, AkeService
+from .wiki.spirecodex import SpireCodexClient, SpireCodexService
 
 ADMIN_WORDS = {"stats", "clear-cache", "session", "doctor"}
 # Aligns with the conversation topic lifetime: followups inside one topic
@@ -85,7 +86,10 @@ class GameWiki(Star):
         # clear-cache must count and drop each entry exactly once.
         cache = Cache(directory)
         self.cache = cache
-        self.services: dict[str, QueryService | ArknightsSources | EndfieldSources] = {}
+        self.services: dict[
+            str,
+            QueryService | ArknightsSources | EndfieldSources | SpireCodexService,
+        ] = {}
         self.clients: list[WikiClient] = []
         self._image_slots = asyncio.Semaphore(2)
         # Sent portraits within one chat, kept until the conversation topic
@@ -140,6 +144,22 @@ class GameWiki(Star):
                     primary,
                     build_service(code, "bwiki"),
                     timeout=number("query_timeout_seconds", 15, 5, 30),
+                )
+            elif code == "sts2":
+                client = SpireCodexClient(
+                    cache,
+                    number("timeout_seconds", 8, 2, 15),
+                    concurrency=int(number("upstream_concurrency", 2, 1, 8)),
+                    pace=number("upstream_pace_seconds", 0.3, 0.1, 2),
+                )
+                self.clients.append(client)
+                self.services[code] = SpireCodexService(
+                    client,
+                    aliases={**global_aliases, **game_aliases.get(code, {})},
+                    timeout=number("query_timeout_seconds", 15, 5, 30),
+                    search_ttl=number("search_cache_seconds", 600, 0, 3600),
+                    page_ttl=number("page_cache_seconds", 21600, 0, 86400),
+                    max_chars=int(number("max_evidence_chars", 6000, 1000, 8000)),
                 )
             else:
                 self.services[code] = build_service(code, "bwiki")
@@ -645,6 +665,12 @@ class GameWiki(Star):
         async for reply in self._wiki_command(event, PROFILES["zmd"]):
             yield reply
 
+    @filter.command("sts2")
+    async def wiki_command_sts2(self, event: AstrMessageEvent):
+        """sts2 名称或问题：查询杀戮尖塔2 Spire Codex，返回概览和来源。"""
+        async for reply in self._wiki_command(event, PROFILES["sts2"]):
+            yield reply
+
     async def _tool_search(self, event, query, question, game):
         if not self._allowed(event):
             return {
@@ -692,6 +718,14 @@ class GameWiki(Star):
         if isinstance(page_id, float) and page_id.is_integer():
             page_id = int(page_id)
         question = normalize_slang(question, service.profile)
+        if game == "sts2":
+            if source and source != "spirecodex":
+                return {
+                    "status": "error",
+                    "code": "bad_input",
+                    "message": "杀戮尖塔2补读请留空 source 或填写 spirecodex。",
+                }
+            return await self._run(service.read, page_id, question, section)
         if game in {"arknights", "zmd"} or source:
 
             async def read_from_source():

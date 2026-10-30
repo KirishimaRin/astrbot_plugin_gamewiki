@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/KirishimaRin/astrbot_plugin_gamewiki/actions/workflows/ci.yml/badge.svg)](https://github.com/KirishimaRin/astrbot_plugin_gamewiki/actions/workflows/ci.yml)
 
-查询原神、崩坏：星穹铁道、绝区零、明日方舟与明日方舟：终末地的角色、技能、材料、配装、卡池和任务资料。支持命令查询与大模型工具调用，向用户返回中文概览、证据卡片与来源链接。明日方舟优先 PRTS，终末地优先 AKEData，其余三款游戏使用 BWIKI。所有公开维基查询均直接调取公开接口，无需 API Key、UID 或游戏账号凭据。
+查询原神、崩坏：星穹铁道、绝区零、明日方舟、明日方舟：终末地与杀戮尖塔2的角色、卡牌、遗物、技能、材料、配装、卡池和任务资料。支持命令查询与大模型工具调用，向用户返回中文概览、证据卡片与来源链接。明日方舟优先 PRTS，终末地优先 AKEData，杀戮尖塔2使用 Spire Codex，其余三款游戏使用 BWIKI。所有公开维基查询均直接调取公开接口，无需 API Key、UID 或游戏账号凭据。
 
 当前版本：**v0.3.1**；作者：**KirishimaRin**；插件标识：`astrbot_plugin_gamewiki`。持续改进计划见 [ROADMAP](docs/ROADMAP.md)。
 
@@ -44,7 +44,7 @@
 
 ## 支持游戏与数据源
 
-五款游戏共用一套查询管线，各站点数据源按稳定性与完整度分级：
+六款游戏共用一套查询管线，各站点数据源按稳定性与完整度分级：
 
 | 游戏代号 | 游戏名称 | 快捷命令 | 优先主数据源 | 备用数据源 | 说明 |
 |---|---|---|---|---|---|
@@ -53,6 +53,7 @@
 | `zzz` | 绝区零 | `/zzz` | [绝区零 BWIKI](https://wiki.biligame.com/zzz/) | — | 代理人、音擎、驱动盘、影画、调频聚合页 |
 | `arknights` | 明日方舟 | `/ark` | [PRTS.Wiki](https://prts.wiki/) | [方舟 BWIKI](https://wiki.biligame.com/arknights/) | 优先 PRTS（卡池一览与寻访规则），超时回退 |
 | `zmd` | 明日方舟：终末地 | `/zmd` | [AKEData](https://www.akedata.wiki/) | [终末地 BWIKI](https://wiki.biligame.com/zmd/) | 优先 AKEData 结构化数据，未收录内容回退 |
+| `sts2` | 杀戮尖塔2 | `/sts2` | [Spire Codex](https://spire-codex.com/) | — | 卡牌、遗物、药水、怪物、事件、角色；官方简体中文数据 |
 
 ---
 
@@ -80,7 +81,7 @@ https://github.com/KirishimaRin/astrbot_plugin_gamewiki
 
 ## 命令与交互
 
-默认命令前缀为 `/`（若在 AstrBot 中自定义了前缀，按配置使用）。插件注册了 **5 个游戏入口主命令**：
+默认命令前缀为 `/`（若在 AstrBot 中自定义了前缀，按配置使用）。插件注册了 **6 个游戏入口主命令**：
 
 | 入口指令 | 对应游戏 | 查询示例 |
 |---|---|---|
@@ -89,6 +90,7 @@ https://github.com/KirishimaRin/astrbot_plugin_gamewiki
 | `/zzz` | 绝区零 | `/zzz 艾莲怎么获取`<br>`/zzz 简意象影画`<br>`/zzz 驱动盘词条搭配` |
 | `/ark` | 明日方舟 | `/ark 能天使专三材料`<br>`/ark 银灰精英化`<br>`/ark 寻访保底是多少`<br>`/ark 寻访凭证怎么获得` |
 | `/zmd` | 终末地 | `/zmd 汤汤技能`<br>`/zmd 武器图鉴`<br>`/zmd 干员基础属性` |
+| `/sts2` | 杀戮尖塔2 | `/sts2 燃烧之血`<br>`/sts2 打击`<br>`/sts2 铁甲战士初始卡组`<br>`/sts2 树叶史莱姆招式` |
 
 ### 常见查询模式
 - **条目基础介绍**：`/ys 钟离` ➡️ 返回角色定位、神之眼、基础简介与立绘。
@@ -134,7 +136,7 @@ AI 工具路径全面接入黑话归一化逻辑，大模型对话中调用工�
 
 | 配置项 | 默认值 | 说明 |
 |---|:---:|---|
-| `games` | `["ys", "sr", "zzz", "arknights", "zmd"]` | 启用的游戏列表。可按需删减，空列表自动回退为全部启用 |
+| `games` | `["ys", "sr", "zzz", "arknights", "zmd", "sts2"]` | 启用的游戏列表。可按需删减，空列表自动回退为全部启用 |
 | `model_provider` | `""` (留空) | 插件专属模型：留空跟随会话聊天模型；下拉指定后固定使用该模型，失败自动回退会话模型 |
 | `model_timeout_seconds` | `20` | 单次大模型调用超时（2–60 秒） |
 | `overview_chars` | `250` | 命令模型概览目标字数（150–500 字，附证据卡片时正文自动精简） |

@@ -135,3 +135,15 @@
 - 清洗：描述含 `[gold]/[blue]/[sine]/[jitter]/[font_size=22]` 等游戏内 BBCode，需只删标签保留文字；能力 `description` 可能丢数值（如 Strength 的 `[blue][/blue]`），需用 `description_raw` 或明确标注。
 - 范围：v1 卡牌/遗物/药水/怪物/事件/角色；命令 `/sts2`，游戏代码 `sts2`；无备用源，失败时明确报错；证据卡片与卡图可复用现有路径，webp 需确认平台兼容。
 - 本次仅调研，未改运行逻辑；报告在 /data/workspace/answers/2026-10-30-sts2-wiki-research.html。
+
+## 杀戮尖塔2 接入实现（2026-10-30，分支 `feature/slay-the-spire-2-wiki`）
+
+- `SpireCodexService` 不是 MediaWiki：`WikiClient.get(path, params, ttl)` 复用缓存/合并/节流；`_is_empty`/`_validate_payload` 钩子区分数组响应。不要直接把 `request()` 用于 Spire Codex（会附加 `format=json`）。
+- `entry_id` 对 key 做 `.upper()`：搜索路径是小写 `strike_ironclad`，实体 ID 是大写 `STRIKE_IRONCLAD`；去掉归一会让 `read` 找不到候选。page_id 用 4-bit kind + 48-bit digest，`read` 通过对应 kind 的索引还原。
+- `_read` 拉取整类索引（卡牌约 655 KB），内存 `_indexes` + SQLite 双层缓存；不要改成逐个详情请求，角色初始卡组需要整卡索引。
+- 角色 `starting_deck/starting_relics` 是 PascalCase；`_normalize_id` 只对非 UPPER_SNAKE 插入下划线，避免 `BURNING_BLOOD` 被拆成单字母。
+- 搜索会命中描述且同名实体多：`search` 必须精确名称优先；同名候选带角色/类型标签，并设置 `choice_intro`，不能沿用“没有同名条目”的默认文案。
+- BBCode：`clean()` 把 `[energy:N]` 转 `N费`、空强调对 `[blue][/blue]` 转 `X`；能力 `description` 可能丢数值，`effect_text` 先 `description` 后 `description_raw`。不要把 `[gold]` 等标签原样送进卡片或模型。
+- `_tool_read` 对 sts2 单独处理：source 留空或 `spirecodex`；不要走 `read_from_source`（它只认 bwiki 且会拒绝其他游戏）。
+- 验证：`pytest -q` 356 passed；Ruff 通过；framework 4.5.7/4.29.3 通过；package 34 files/11,100,102 bytes；真实 API 冒烟覆盖遗物、同名卡、怪物、事件、角色初始卡组、能力。
+- 尚无备用源；Spire Codex 故障时只能明确报错。未改版本号。

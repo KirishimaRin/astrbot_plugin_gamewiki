@@ -15,13 +15,14 @@ wiki/formatter.py        平台短摘录与来源展示
 wiki/query.py            搜索、候选重排、重定向与查询编排
 wiki/sources.py          PRTS/AKEData 优先、BWIKI 回退与来源固定
 wiki/akedata.py          终末地公开版本数据表、中文文本与分节证据适配
+wiki/spirecodex.py       杀戮尖塔2 Spire Codex REST 实体、分节证据与同名消歧
 wiki/images.py           AKEData 立绘有界下载、压缩与临时文件清理
 wiki/prts.py             PRTS 页面结构与干员元数据适配
 wiki/assistant.py        命令意图解析与概览协调（每命令至多两次模型调用）
 wiki/layout.py           跨游戏表格与正文排版
 wiki/limits.py           单用户/全局调用限制
 wiki/conversation.py     按会话与用户隔离的候选、已确认条目和过期回收
-wiki/games.py            五游戏档案表与别名配置解析
+wiki/games.py            六游戏档案表与别名配置解析
 wiki/models.py           页面与分节数据结构
 tests/                   离线测试与合成 HTML 样例
 scripts/                 打包、在线验证及框架契约检查

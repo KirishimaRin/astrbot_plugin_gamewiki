@@ -247,7 +247,7 @@ def test_session_override_persists_to_data_dir(plugin):
     ) == {"test:GroupMessage:7": True}
 
 
-@pytest.mark.parametrize("game", ["ys", "sr", "zzz", "arknights", "zmd"])
+@pytest.mark.parametrize("game", ["ys", "sr", "zzz", "arknights", "zmd", "sts2"])
 def test_public_commands_can_disable_inspect_and_restore_session(plugin, game):
     instance, Event, module = plugin
     profile = module.PROFILES[game]
@@ -398,7 +398,7 @@ def _wiki_page(title="纳西妲", page_id=42):
     }
 
 
-@pytest.mark.parametrize("game", ["ys", "sr", "zzz", "arknights", "zmd"])
+@pytest.mark.parametrize("game", ["ys", "sr", "zzz", "arknights", "zmd", "sts2"])
 def test_numbered_choices_and_plain_followups_use_selected_page_id(plugin, game):
     instance, Event, module = plugin
     search = AsyncMock(

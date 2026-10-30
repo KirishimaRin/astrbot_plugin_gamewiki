@@ -17,6 +17,10 @@ class WikiError(Exception):
 def page_url(title: str, anchor: str = "", code: str = "ys", source: str = "") -> str:
     source = source or default_source(code)
     source_api(code, source)  # Reject unknown game/source combinations.
+    if source == "spirecodex":
+        # Spire Codex links are /{lang}/{type}/{id}; the service owns that
+        # mapping. Refuse to fabricate a BWIKI URL for an unknown title.
+        raise ValueError("Spire Codex links require an entity type")
     if source == "akedata":
         kind = (
             "character"

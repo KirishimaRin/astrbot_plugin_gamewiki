@@ -12,11 +12,11 @@ from wiki.models import Section, page_url
 from wiki.query import QueryService
 
 
-def test_profiles_cover_five_games_with_unique_commands():
-    assert set(PROFILES) == {"ys", "sr", "zzz", "arknights", "zmd"}
+def test_profiles_cover_six_games_with_unique_commands():
+    assert set(PROFILES) == {"ys", "sr", "zzz", "arknights", "zmd", "sts2"}
     commands = [p.command for p in PROFILES.values()]
     assert len(commands) == len(set(commands))
-    assert commands == ["ys", "sr", "zzz", "ark", "zmd"]
+    assert commands == ["ys", "sr", "zzz", "ark", "zmd", "sts2"]
     assert all(not profile.aliases for profile in PROFILES.values())
     assert YS.card_words, "only the Genshin profile routes card lookups"
     for code, profile in PROFILES.items():
