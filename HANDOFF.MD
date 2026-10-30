@@ -126,3 +126,12 @@
 
 - metadata、README、CHANGELOG 同步为 v0.3.1。
 - `query_notice`（默认 true）：限流校验通过后、`conversations.begin` 之前发送“正在查询<游戏名>百科，请稍候…”。放在 `_limited` 之后是刻意的——帮助、管理员指令、未启用会话、选择编号越界、限流拒绝都在此之前即时返回，不应先发提示。发送失败只记 debug 日志，不能中断查询。候选选择与追问同样会发提示；测试 fixture 显式关闭 `query_notice` 以聚焦结果断言，提示本身有专项用例。framework 契约脚本里所有 `event.sent` 断言已改为先校验提示、再校验结果。
+
+## 杀戮尖塔2 数据源调研（2026-10-30，尚未实施）
+
+- 结论：可行，主源选 Spire Codex 公共 REST API（https://spire-codex.com/api），不走 MediaWiki。BWIKI `slaythespire2` 站点统计 116 页面/0 条目；灰机 `sts2.huijiwiki.com` 的 `api.php` 与页面均被 Cloudflare 挑战页拦截且 robots 限制 AI 抓取；wanwiki 同样被 Cloudflare 拦截；urarawin 是静态 HTML、无 API，仅可作后续备选。
+- API 事实：`?lang=zhs` 返回游戏官方简中；`/api/stats` 为 cards 577、relics 296、monsters 115、events 66、potions 63、characters 5；`/api/search` 每类最多 5 条且会命中描述，候选必须精确名称优先；`/api/rate-limits` 无 Key 为 300/min per endpoint（开发者页写 15/min，属旧值）；当前 beta 数据版本 v0.111.0，游戏仍处 EA，schema 无 SLA。
+- 接入约束：新建 `wiki/spirecodex.py`，不要直接复用 `WikiClient` 的 JSON 层——`_read_json` 只接受 dict、`_fetch_and_cache` 假设 `query.search`、`request()` 会附加 MediaWiki 参数；列表端点返回数组。实体 ID 为 UPPER_SNAKE，但角色 `starting_deck/starting_relics` 是 PascalCase，需归一化。同名卡（如“打击”五角色各一张）必须带角色/类型消歧。
+- 清洗：描述含 `[gold]/[blue]/[sine]/[jitter]/[font_size=22]` 等游戏内 BBCode，需只删标签保留文字；能力 `description` 可能丢数值（如 Strength 的 `[blue][/blue]`），需用 `description_raw` 或明确标注。
+- 范围：v1 卡牌/遗物/药水/怪物/事件/角色；命令 `/sts2`，游戏代码 `sts2`；无备用源，失败时明确报错；证据卡片与卡图可复用现有路径，webp 需确认平台兼容。
+- 本次仅调研，未改运行逻辑；报告在 /data/workspace/answers/2026-10-30-sts2-wiki-research.html。
