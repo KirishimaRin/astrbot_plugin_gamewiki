@@ -23,6 +23,9 @@ STS2INFO_MECHANICS = STS2INFO + "/zh/mechanics"
 STS2INFO_GUIDES = STS2INFO + "/zh/guides"
 STS2FRONT = "https://sts2front.com"
 STS2FRONT_CHARACTERS = STS2FRONT + "/zh-cn/characters"
+# Only quote the part needed for retrieval; the full article stays on the
+# source site and is linked from the result.
+EXCERPT_CHARS = 2500
 CHARACTER_IDS = {
     "铁甲战士": "ironclad",
     "静默猎手": "silent",
@@ -123,6 +126,11 @@ def _clean(text: str) -> str:
 
 def _slug(text: str) -> str:
     return quote(str(text).strip(), safe="")
+
+
+def _excerpt(text) -> str:
+    value = str(text or "")
+    return value[:EXCERPT_CHARS] + "……（节选）" if len(value) > EXCERPT_CHARS else value
 
 
 class ChineseGuideService:
@@ -327,7 +335,7 @@ class ChineseGuideService:
             return {
                 "key": "cn:mechanic:sts2info:" + _slug("状态效果与结算机制"),
                 "title": "状态效果与结算机制",
-                "text": text[:5000],
+                "text": _excerpt(text),
                 "url": STS2INFO_MECHANICS,
             }
         ranked = sorted(
@@ -338,10 +346,13 @@ class ChineseGuideService:
         if not ranked or ranked[0][0] <= 0:
             return None
         best = ranked[0][1]
+        text = best["text"]
+        if len(text) > EXCERPT_CHARS:
+            text = text[:EXCERPT_CHARS] + "……（节选）"
         return {
             "key": "cn:mechanic:sts2info:" + _slug(best["title"]),
             "title": best["title"],
-            "text": best["text"],
+            "text": text,
             "url": STS2INFO_MECHANICS,
         }
 
@@ -382,7 +393,7 @@ class ChineseGuideService:
         return {
             "key": "cn:guide:sts2info:" + item["slug"],
             "title": page.get("title") or item["title"],
-            "text": page.get("text", ""),
+            "text": _excerpt(page.get("text", "")),
             "url": item["url"],
         }
 
@@ -398,7 +409,7 @@ class ChineseGuideService:
         return {
             "key": f"cn:guide:sts2front:{char_id}",
             "title": page.get("title") or character,
-            "text": page.get("text", ""),
+            "text": _excerpt(page.get("text", "")),
             "url": url,
         }
 
@@ -427,7 +438,7 @@ class ChineseGuideService:
             return {
                 "id": key,
                 "title": page.get("title") or slug,
-                "content": page.get("text", ""),
+                "content": _excerpt(page.get("text", "")),
                 "url": f"{STS2INFO_GUIDES}/{slug}",
             }
         prefix = "cn:guide:sts2front:"
@@ -441,7 +452,7 @@ class ChineseGuideService:
             return {
                 "id": key,
                 "title": page.get("title") or char_id,
-                "content": page.get("text", ""),
+                "content": _excerpt(page.get("text", "")),
                 "url": url,
             }
         return None

@@ -145,7 +145,7 @@
 - 搜索会命中描述且同名实体多：`search` 必须精确名称优先；同名候选带角色/类型标签，并设置 `choice_intro`，不能沿用“没有同名条目”的默认文案。
 - BBCode：`clean()` 把 `[energy:N]` 转 `N费`、空强调对 `[blue][/blue]` 转 `X`；能力 `description` 可能丢数值，`effect_text` 先 `description` 后 `description_raw`。不要把 `[gold]` 等标签原样送进卡片或模型。
 - `_tool_read` 对 sts2 单独处理：source 留空或 `spirecodex`；不要走 `read_from_source`（它只认 bwiki 且会拒绝其他游戏）。
-- 验证：`pytest -q` 405 passed；Ruff 通过；framework 4.5.7/4.29.3 通过；package 35 files/11,133,225 bytes；Spire Codex 冒烟 25/25；覆盖率审计诊断 45/47（仅“攻略/机制”因中文源超时回退英文），本地 `--strict` 阈值 80% 通过。
+- 验证：`pytest -q` 405 passed；Ruff 通过；framework 4.5.7/4.29.3 通过；package 35 files/11,134,730 bytes；Spire Codex 冒烟 25/25；覆盖率审计诊断 45/47（仅“攻略/机制”因中文源超时回退英文），本地 `--strict` 阈值 80% 通过。
 - 尚无备用源；Spire Codex 故障时只能明确报错。未改版本号。
 
 ## 杀戮尖塔2 计划内增强（2026-10-30）
@@ -239,3 +239,11 @@
 
 - `ChineseGuideService` 记录按主机冷却：429 时读取 `Retry-After`，在冷却期内直接抛 `httpx.ConnectError`，不再重复打源站；调用方回退 Spire Codex 英文。
 - 新增 webp 发送 wiring 测试：`_send_entry_image(..., convert_webp=True)` 必须把开关传给 `prepared_image`；真实转码本身由 `tests/test_images.py` 覆盖。
+
+## 杀戮尖塔2 中文源条款确认（2026-10-30）
+
+- Spire Codex：`API_TERMS.md` 明确公共 API 免费供社区使用（含商业项目），注明来源“鼓励但不强制”；无 SLA、schema 可能随补丁变化；游戏数据版权归 Mega Crit，禁止用数据重编译/重打包/再分发游戏。现有使用方式符合。
+- STS2.INFO：未找到 terms/privacy/license 页面；robots `Allow: /` 并提供 sitemap；页脚声明“粉丝攻略站，所有游戏内容版权归 MegaCrit 所有，数据来源 Spire Codex”。没有对编辑正文的再分发授权。
+- STS2FRONT：未找到 terms/privacy/contact 页面；robots `Allow: /` 并提供 sitemap；页面声明内容来自 Mega Crit 官方发布、游戏内数据和社区报告，同样没有明确的正文再分发授权。
+- 结论：抓取技术上被 robots 允许，但正文没有显式授权。当前只做按需抓取、短节选（`EXCERPT_CHARS=2500`）、来源标注和原文链接，不镜像、不打包全文；`sts2_chinese_sources=false` 可完全回退 Spire Codex 英文。若插件进行商业分发或大规模运营，应先联系站点运营方取得授权。
+- 测试 fixture 只使用合成 HTML 片段，不把 STS2.INFO/STS2FRONT 整页纳入仓库或安装包。
