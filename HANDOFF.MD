@@ -257,3 +257,38 @@
 - 具体成就名（如“完美牌组 怎么完成”）在 `/api/achievements` 中精确匹配，不再要求问题里出现“成就”二字。
 - `适合/值得/值不值` 纳入卡牌/遗物社区分节触发词；`_split_kind_prefix` 要求分隔符，`角色行为`/`遗物效果` 不再被拆。
 - 遭遇候选标签加“遭遇 ·”，与同名怪物候选区分。
+
+## 杀戮尖塔2 列表/排行与 Boss 打法（2026-10-30）
+
+- 列表/排行是合成 kind `list`：`PATHS` 末尾追加 `"list": "lists"`（追加在末尾，已有 KIND_CODES 与历史 page_id 不变）；`_detail("list", key)` 按 key 还原，key 形如 `RELICS_POOL_IRONCLAD`、`CARDS_COLOR_IRONCLAD_RARITY_RARE_TYPE_ATTACK`、`RANK_CARDS_COLOR_SILENT`，全大写、值段不含下划线。`_read` 在 `_known` 丢失（进程重启）时用 `_list_keys()` 枚举闭集重新哈希还原，不依赖不存在的 /api/lists。
+- 列表直接用 API 过滤参数：`/api/cards?color=&rarity=&type=`、`/api/relics?pool=`（rarity/type 用英文 key：Basic/Common/Uncommon/Rare/Ancient 与 Attack/Skill/Power，带 lang=zhs）。排行数据来自 `/api/runs/scores/{cards|relics}`（win_rate 已是百分数），角色胜率来自 community-stats 的 `by_character`；排行数据失败时降级为普通列表并注明“暂无社区对局数据”。
+- `_list_intent` 在 `_search` 里、多语言搜索之前执行，命中即整题走列表。守卫：文本含“删”（社区统计）或 卡组/牌组/牌堆（初始卡组问法）不进列表；裸“胜率排行”保留攻略路径（既有 audit 用例），泛化 Tier 需 表/榜/当前/版本/中文/Tier 等话题词；角色+胜率+A10 仍走进阶胜率分支。“这张牌胜率多少”因无角色且无话题词保持实体问法。
+- 裸名称列表查询会把 question 设为分节名（遗物列表/卡牌列表/胜率排行），让 evidence 命中列表分节；列表分节首几行同时放进 `基本信息`，与解锁/成就总览同一模式。跨角色列表每行带角色标签，五张“打击”可区分；单角色列表带费用/稀有度标签。
+- Boss 打法：`_monster_tactics` 只用 moves/attack_pattern/innate_powers 生成（最高伤害招式、首回合招式、随机/条件出招、固有能力、进阶生命），没有逐 Boss 社区攻略数据，不编造。注意 act.bosses 的 ID 是 `{NAME}_BOSS`（遭遇 ID），怪物索引是 `{NAME}`；`_boss_tactics` 依次尝试原 ID、归一化、去 `_BOSS` 后缀。
+- 进阶解锁规则文本（ASCENSION_RULES）是本适配器的编辑性总结，Spire Codex 无该页面；“进阶怎么解锁”合成 `ascension/UNLOCK` 实体，链接 /zhs/unlocks。实测澄清：进阶/成就实体页链接并非 404——正确路由是 /zhs/ascensions/level_10 与 /zhs/achievements/all_cards_upgraded（API id `LEVEL_10`/`ALL_CARDS_UPGRADED` 经 `.lower()` 后正好命中）；此前记录的 404 是探测时手拼了 `/ascensions/10`、`/achievements/all-cards-upgraded` 这类错误形态。
+- “卡牌/遗物/药水怎么获得”走对应机制页（card-rarity/relic-distribution/potion-drop-rates），英文正文由概览模型总结；specifics 的 获取/获得 行目标改为元组（正文/摘要/基本信息），实体页无正文分节时行为不变。
+- STS2 intents/specifics 新增：排行→胜率排行、有哪些/哪些/列表/遗物池→列表分节、怎么打/打法/应对→打法要点/BOSS应对。打法行必须排在 BOSS 行之前，否则“Boss怎么应对”先命中纯名单；“怎么打/打法/应对”因此成为全局方面词，其他游戏“X怎么打”也会拆成实体+方面（行为正确）。
+- 怪物 min/max_hp 的进阶上限可能为 null，显示统一用 `or '?'` 兜底，避免“399–None”。
+- 验证：pytest 422 passed；Ruff format/check 通过；framework 4.5.7/4.29.3 通过；package 35 files/11,142,278 bytes；smoke_sts2 30/30；audit 63/65（未过项为中文源超时回退英文的“攻略/机制”，与既有诊断一致）。未改版本号。
+
+## 杀戮尖塔2 中文攻略源修复（2026-10-30）
+
+- 根因实测：`sts2.info/zh/guides`（攻略列表页）对 Python httpx 的 TLS 指纹**确定性 503**（curl 同 UA 200、浏览器 UA 被拖挂超时、httpx 恒 503），`/zh/mechanics` 与 STS2FRONT 全部 200 正常。历史上“攻略/机制”两条 audit 用例间歇失败，主要就是该页被 WAF 指纹拦截，而非网络慢或 UA 被拒。
+- 修复：`ChineseGuideService.guide()` 改为两级列表源——STS2.INFO 可达时仍优先（既有测试路径不变），列表请求失败或无命中时回退 STS2FRONT 的 `/zh-cn/tips/` 索引（中文攻略：Boss 打法、商店/篝火策略、Tier、解锁等），文章页沿用 `_parse_sts2front_page`。tips 的 key 是 `cn:guide:sts2front:tips:{slug}`，`read()`/`url()` 按最长前缀先匹配；`_entry` 的来源标签因前缀包含 `cn:guide:sts2front:` 自动落到“杀戮尖塔2 STS2FRONT”。列表解析抽成 `_parse_link_list(html, prefix, origin)` 共用，URL 保留源站原始斜杠形态。
+- 重试策略：中文源 5xx 只重试一次（WAF 拦截不会在 0.5 秒内消失，尽快落到下一来源）；超时/网络错误重试三次。429 行为不变（按 Retry-After 冷却）。
+- 排序同义扩展：用户问“攻略”，STS2FRONT tips 标题多用“指南/打法/路线”，`_ranked_guide` 按 `GUIDE_SYNONYMS` 扩展查询词后再打分，否则中文命中恒为空。
+- 挂起防护：STS2.INFO 的 `/zh/guides` 还有第三种形态——既不 503 也不响应（tarpit）。`guide()` 给第一个源的列表请求单独设 `min(4, timeout/4)` 秒上限（可达时实测 ≈0.3s），超时即切 STS2FRONT，避免耗尽整个中文超时预算；离线测试 `test_guide_sts2info_tarpit_falls_back_to_tips` 用异步 handler 模拟挂起。
+- `scripts/audit_sts2_queries.py` 改用持久缓存 `research/sts2-cache/`（research/ 已整体 gitignore）：中文大页面冷抓偶发触发限流会读成假覆盖失败，缓存后本地复跑稳定；CI drift 每次仍冷跑、保持诊断性质。smoke 维持临时目录（全部为 Spire Codex 稳定用例）。
+- 澄清记录：进阶/成就实体页链接从未损坏（`/zhs/ascensions/level_10`、`/zhs/achievements/all_cards_upgraded` 均 200），此前“404”是探测时手拼错误 URL 形态所致；`_url` 的 `.lower()` 恰好生成正确路由，无需改动。
+- 验证：pytest 425 passed；Ruff 通过；冷缓存与热缓存 audit 均 **65/65**；smoke 30/30。未改版本号。
+
+## 杀戮尖塔2 系统级问法补全（2026-10-30）
+
+- 按「用户会在 wiki 搜什么」逐类验证后补齐系统级/概述型问题，全部走既有机制页与列表机器，无新数据源：
+  - `分数怎么算`、`每日挑战`、`问号房有什么` → CONCEPT_MECHANICS 直连机制页 slug（score-formula / unknown-rooms；地图生成、篝火选项同理）。daily 没有独立页，score-formula 正文含每日榜单。
+  - `苦痛/充能球/关键词/附魔/事件有哪些` → `_list_intent` 新增 REFERENCE_LIST_KINDS，合成 list kind 走 `_reference_list_sections`（`_index(kind,"zhs")` 整表，行格式 `名称：描述前60字`）。key 为 RELICS/AFFLICTIONS/ORBS/KEYWORDS/ENCHANTMENTS/EVENTS。
+  - `联机/多人/合作怎么玩`、`卡组推荐`、`附魔怎么选` → CHINESE_GUIDE_WORDS 加 附魔/联机/多人/合作，GUIDE_TOPICS 加 组合/选牌/开荒/时间线 等，GUIDE_SYNONYMS 加 卡组↔构筑/组合/选牌、联机↔合作/多人/单人；tips 标题「先玩单人还是合作」「最强卡牌组合」「附魔怎么选」得以命中。
+  - `诅咒是什么` 等释义问法在 `_search` 归一后剥「是什么意思/是什么」后缀（剩余 ≥2 字才剥），裸词走 term_exact 候选。
+  - `BOSS遗物有哪些` → `_list_intent` note 模式（RELICS_NOTE_BOSS），给「STS2 不设 Boss 遗物分类 + 稀有度分布计数」，不再误导性返回全量遗物。注意括号：`kind=="relic" and ("boss" in text.lower() or "首领" in text)`，先前漏括号会让裸「首领」误触发。
+- 附魔类概念问法必须同时在 CONCEPT_WORDS（拦截 /api/search 描述命中带来的无关遗物候选）与 CHINESE_GUIDE_WORDS（放行中文攻略尝试），缺一个就会退回噪声候选或 not_found。
+- 验证：pytest 432 passed；Ruff 通过；framework 4.5.7/4.29.3 通过；package 35 files/11,149,065 bytes；smoke 33/33；audit 75/75（含全部新增系统级问法）。未改版本号。
