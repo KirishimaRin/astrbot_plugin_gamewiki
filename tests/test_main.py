@@ -10,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 
 from wiki.games import PROFILES
@@ -133,6 +134,81 @@ def test_games_default_and_invalid_config_enable_all_games(plugin, config):
         assert set(configured.services) == set(module.PROFILES)
         schema = json.loads((ROOT / "_conf_schema.json").read_text(encoding="utf-8"))
         assert schema["games"]["default"] == list(module.PROFILES)
+    finally:
+        asyncio.run(configured.terminate())
+
+
+def test_sts2_command_and_tool_use_the_real_service(plugin):
+    instance, Event, module = plugin
+    relic = {
+        "id": "BURNING_BLOOD",
+        "name": "燃烧之血",
+        "description": "在战斗结束时，回复[green]6[/green]点生命。",
+        "rarity": "初始遗物",
+        "pool": "ironclad",
+        "image_url": "/static/images/relics/burning_blood.webp",
+    }
+
+    def handler(request):
+        path = request.url.path
+        if path == "/api/changelogs":
+            return httpx.Response(200, json=[{"game_version": "1.3.1"}])
+        if path == "/api/search":
+            return httpx.Response(
+                200,
+                json={
+                    "categories": [
+                        {
+                            "kind": "relic",
+                            "items": [
+                                {
+                                    "name": "燃烧之血",
+                                    "path": "/relics/burning_blood",
+                                    "subtitle": "初始遗物 · ironclad",
+                                }
+                            ],
+                        }
+                    ]
+                },
+            )
+        if path in {"/api/relics", "/api/relics/burning_blood"}:
+            payload = [relic] if path == "/api/relics" else relic
+            return httpx.Response(200, json=payload)
+        return httpx.Response(404, json={"detail": "Not Found"})
+
+    client = module.SpireCodexClient(
+        instance.cache, timeout=2, transport=httpx.MockTransport(handler)
+    )
+    service = module.SpireCodexService(client, timeout=2)
+    instance.services["sts2"] = service
+
+    async def check():
+        try:
+            event = Event("sts2 燃烧之血 效果")
+            assert [r async for r in instance.wiki_command_sts2(event)] == []
+            assert "燃烧之血" in event.sent[-1]
+            assert "6" in event.sent[-1]
+            page_id = next(iter(service._known))
+            result = json.loads(
+                await instance.wiki_read(Event(), page_id, "", "效果", "sts2")
+            )
+            assert result["status"] == "ok"
+            assert result["title"] == "燃烧之血"
+        finally:
+            await client.close()
+
+    asyncio.run(check())
+
+
+def test_sts2_custom_base_is_passed_to_client_and_service(plugin):
+    instance, _, _ = plugin
+    configured = type(instance)(
+        object(),
+        {"games": ["sts2"], "spire_codex_base": "https://example.test"},
+    )
+    try:
+        assert configured.services["sts2"].base == "https://example.test"
+        assert configured.clients[0].api == "https://example.test"
     finally:
         asyncio.run(configured.terminate())
 

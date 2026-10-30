@@ -1,0 +1,244 @@
+{
+ "id": "ABYSSAL_BATHS",
+ "name": "深渊浴场",
+ "type": "Event",
+ "act": "Underdocks",
+ "description": "你发现了一间僻静的密室。\n\n氤氲的雾气从沸腾的池水中升腾而起，池水的色泽正以一种催眠般的节奏变幻。天花板上垂挂着覆满藤壶的异形生长物，滴落的黏稠液体在触及水面的瞬间，一边发出嘶嘶声，一边如活物般扭动挣扎。空气粘滞沉重，充斥着[blue]盐[/blue]的味道和某种[green]不言而喻的活物的气息[/green]。\n\n当你靠近那口最大的水池时，液面泛起了涟漪。水流翻腾得愈发狂乱，仿佛正期待着你的到来。",
+ "preconditions": null,
+ "options": [
+  {
+   "id": "IMMERSE",
+   "title": "投身其中",
+   "description": "获得[green]2[/green]点最大生命值。受到[red]3[/red]点伤害。"
+  },
+  {
+   "id": "ABSTAIN",
+   "title": "敬而远之",
+   "description": "回复[green]10[/green]点生命。"
+  }
+ ],
+ "pages": [
+  {
+   "id": "ABSTAIN",
+   "description": "你抵御了池水的诱惑，转而收集起池边凝结的晶盐。当你将盐粒涂抹在皮肤上时，池水开始愤怒地翻腾，躁动地翻涌起白沫。周遭的温度骤降，在那一瞬间，房间内所有能映照出人影的表面，都浮现出一个双目空洞、形同枯槁的你。那种异样的感觉挥之不去——你似乎错过了某种脱胎换骨的契机。",
+   "options": null
+  },
+  {
+   "id": "ALL",
+   "description": null,
+   "options": [
+    {
+     "id": "LINGER",
+     "title": "沉溺",
+     "description": "获得[green]2[/green]点最大生命值。受到[red]3[/red]点伤害。"
+    },
+    {
+     "id": "EXIT_BATHS",
+     "title": "离开浴场",
+     "description": ""
+    }
+   ]
+  },
+  {
+   "id": "DEATH_WARNING",
+   "description": "[sine][red]再泡下去，你就死定了。[/red][/sine]",
+   "options": [
+    {
+     "id": "LINGER",
+     "title": "沉溺",
+     "description": "[sine][red]再泡下去，你就死定了。[/red][/sine]"
+    },
+    {
+     "id": "EXIT_BATHS",
+     "title": "离开浴场",
+     "description": ""
+    }
+   ]
+  },
+  {
+   "id": "EXIT_BATHS",
+   "description": "你最终还是没能承受住这股灼热感，急忙从池中抽身而出。",
+   "options": null
+  },
+  {
+   "id": "IMMERSE",
+   "description": "池水如烈焰般灼烧着你的每一寸肌肤，那竟是[blue][jitter]彻骨严寒[/jitter][/blue]与[red][jitter]沸腾炽热[/jitter][/red]的诡异交织。\n\n在水面之下，好像有什么东西掠过了你的双腿——是某种触须？还是带有意志的暗流？然而，当剧痛渐渐平息，你感到身体变得…更加凝实，更具质感。同时池水此时似乎正发出一阵满意的低鸣。",
+   "options": [
+    {
+     "id": "LINGER",
+     "title": "沉溺",
+     "description": "获得[green]2[/green]点最大生命值。受到[red]4[/red]点伤害。"
+    },
+    {
+     "id": "EXIT_BATHS",
+     "title": "离开浴场",
+     "description": ""
+    }
+   ]
+  },
+  {
+   "id": "INITIAL",
+   "description": "你发现了一间僻静的密室。\n\n氤氲的雾气从沸腾的池水中升腾而起，池水的色泽正以一种催眠般的节奏变幻。天花板上垂挂着覆满藤壶的异形生长物，滴落的黏稠液体在触及水面的瞬间，一边发出嘶嘶声，一边如活物般扭动挣扎。空气粘滞沉重，充斥着[blue]盐[/blue]的味道和某种[green]不言而喻的活物的气息[/green]。\n\n当你靠近那口最大的水池时，液面泛起了涟漪。水流翻腾得愈发狂乱，仿佛正期待着你的到来。",
+   "options": [
+    {
+     "id": "IMMERSE",
+     "title": "投身其中",
+     "description": "获得[green]2[/green]点最大生命值。受到[red]3[/red]点伤害。"
+    },
+    {
+     "id": "ABSTAIN",
+     "title": "敬而远之",
+     "description": "回复[green]10[/green]点生命。"
+    }
+   ]
+  },
+  {
+   "id": "LINGER1",
+   "description": "[jitter]温度仍在疯狂攀升！[/jitter]\n\n在这股蒸汽将你由内而外彻底蒸熟之前，你还能支撑多久？",
+   "options": [
+    {
+     "id": "LINGER",
+     "title": "沉溺",
+     "description": "获得[green]2[/green]点最大生命值。受到[red]5[/red]点伤害。"
+    },
+    {
+     "id": "EXIT_BATHS",
+     "title": "离开浴场",
+     "description": ""
+    }
+   ]
+  },
+  {
+   "id": "LINGER2",
+   "description": "[jitter][orange]祂的温度仍在飙升！[/orange][/jitter]\n\n池子的咕嘟声，此刻听来竟像是某种狞笑。",
+   "options": [
+    {
+     "id": "LINGER",
+     "title": "沉溺",
+     "description": "获得[green]2[/green]点最大生命值。受到[red]6[/red]点伤害。"
+    },
+    {
+     "id": "EXIT_BATHS",
+     "title": "离开浴场",
+     "description": ""
+    }
+   ]
+  },
+  {
+   "id": "LINGER3",
+   "description": "[b][jitter][red]好烫！！！[/red][/jitter][/b]\n\n你开始好奇这是否就是生活在恶魔之村里的感觉？",
+   "options": [
+    {
+     "id": "LINGER",
+     "title": "沉溺",
+     "description": "获得[green]2[/green]点最大生命值。受到[red]7[/red]点伤害。"
+    },
+    {
+     "id": "EXIT_BATHS",
+     "title": "离开浴场",
+     "description": ""
+    }
+   ]
+  },
+  {
+   "id": "LINGER4",
+   "description": "[sine][purple]你浸泡了太久，已经忘却了时间的流逝，意识也开始模糊…[/purple][/sine]",
+   "options": [
+    {
+     "id": "LINGER",
+     "title": "沉溺",
+     "description": "获得[green]2[/green]点最大生命值。受到[red]8[/red]点伤害。"
+    },
+    {
+     "id": "EXIT_BATHS",
+     "title": "离开浴场",
+     "description": ""
+    }
+   ]
+  },
+  {
+   "id": "LINGER5",
+   "description": "这里很好。",
+   "options": [
+    {
+     "id": "LINGER",
+     "title": "沉溺",
+     "description": "获得[green]2[/green]点最大生命值。受到[red]9[/red]点伤害。"
+    },
+    {
+     "id": "EXIT_BATHS",
+     "title": "离开浴场",
+     "description": ""
+    }
+   ]
+  },
+  {
+   "id": "LINGER6",
+   "description": "真的很棒。",
+   "options": [
+    {
+     "id": "LINGER",
+     "title": "沉溺",
+     "description": "获得[green]2[/green]点最大生命值。受到[red]10[/red]点伤害。"
+    },
+    {
+     "id": "EXIT_BATHS",
+     "title": "离开浴场",
+     "description": ""
+    }
+   ]
+  },
+  {
+   "id": "LINGER7",
+   "description": "你感到舒适",
+   "options": [
+    {
+     "id": "LINGER",
+     "title": "沉溺",
+     "description": "获得[green]2[/green]点最大生命值。受到[red]11[/red]点伤害。"
+    },
+    {
+     "id": "EXIT_BATHS",
+     "title": "离开浴场",
+     "description": ""
+    }
+   ]
+  },
+  {
+   "id": "LINGER8",
+   "description": "[sine]唔…[/sine]",
+   "options": [
+    {
+     "id": "LINGER",
+     "title": "沉溺",
+     "description": "获得[green]2[/green]点最大生命值。受到[red]12[/red]点伤害。"
+    },
+    {
+     "id": "EXIT_BATHS",
+     "title": "离开浴场",
+     "description": ""
+    }
+   ]
+  },
+  {
+   "id": "LINGER9",
+   "description": "[sine]呼...\n...呼噜...[/sine]",
+   "options": [
+    {
+     "id": "LINGER",
+     "title": "沉溺",
+     "description": "获得[green]2[/green]点最大生命值。受到[red]13[/red]点伤害。"
+    },
+    {
+     "id": "EXIT_BATHS",
+     "title": "离开浴场",
+     "description": ""
+    }
+   ]
+  }
+ ],
+ "epithet": null,
+ "dialogue": null,
+ "image_url": null,
+ "relics": null
+}

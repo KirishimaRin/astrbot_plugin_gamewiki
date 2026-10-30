@@ -145,5 +145,15 @@
 - 搜索会命中描述且同名实体多：`search` 必须精确名称优先；同名候选带角色/类型标签，并设置 `choice_intro`，不能沿用“没有同名条目”的默认文案。
 - BBCode：`clean()` 把 `[energy:N]` 转 `N费`、空强调对 `[blue][/blue]` 转 `X`；能力 `description` 可能丢数值，`effect_text` 先 `description` 后 `description_raw`。不要把 `[gold]` 等标签原样送进卡片或模型。
 - `_tool_read` 对 sts2 单独处理：source 留空或 `spirecodex`；不要走 `read_from_source`（它只认 bwiki 且会拒绝其他游戏）。
-- 验证：`pytest -q` 356 passed；Ruff 通过；framework 4.5.7/4.29.3 通过；package 34 files/11,100,102 bytes；真实 API 冒烟覆盖遗物、同名卡、怪物、事件、角色初始卡组、能力。
+- 验证：`pytest -q` 368 passed；Ruff 通过；framework 4.5.7/4.29.3 通过；package 34 files/11,105,027 bytes；真实 API 冒烟覆盖遗物、同名卡、怪物、事件分支、角色初始卡组、出招顺序、能力。
 - 尚无备用源；Spire Codex 故障时只能明确报错。未改版本号。
+
+## 杀戮尖塔2 计划内增强（2026-10-30）
+
+- 事件 `pages` 分支：排除 `INITIAL`/`FINISH`，按页去重、选项按 `(标题,描述)` 去重，最多 3 页；`分支` 的 specifics 必须排在 `选项` 之前，否则“其他选项”会先被更宽的“选项”命中。
+- 怪物 `attack_pattern.states` 转成 `出招顺序`：用 `moves` 的 `move_id→名称` 映射，cycle 按 `next` 走，conditional 只写“按条件选择”不展示 C# 条件；`_kind_hint` 把 出招/招式/意图/血量 归到 monster，用于区分同名怪物与遭遇。
+- `page_id→(kind,id)` 的 `_known` 映射让搜索后的 `read` 直接取详情，不再拉整类索引；进程重启后仍回退索引。角色初始卡组继续用整卡索引，因为一次要解析 10 个 ID。
+- 数据版本取 `/api/changelogs` 最新 `game_version`，缓存 1 小时；变化时清空 `_indexes` 与 `_known`。这是站点数据标记，不等于游戏 EA 版本号（`/api/beta/version` 才是 v0.11x 通道）。sts2 正文缓存默认 3600 秒，低于其他游戏的全局 6 小时。
+- `spire_codex_base` / `spire_codex_cdn` 可指向自建实例；客户端设置 base 后同步更新 `_host`，429 冷却按新主机隔离。
+- 真实响应 fixture 在 `tests/fixtures/spirecodex/`；`scripts/smoke_sts2.py` 做在线结构检查，已加入 CI `drift` 任务。
+- 仍未做：webp 转码兜底、glossary/reference、orb/affliction 列表兜底、draft/pairings/胜率、备用数据源。

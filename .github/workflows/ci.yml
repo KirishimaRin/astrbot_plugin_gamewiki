@@ -73,6 +73,7 @@ jobs:
       - run: python -m pip install -c requirements-constraints.txt -r requirements-dev.txt
       - run: python scripts/smoke.py
       - run: python scripts/audit_categories.py
+      - run: python scripts/smoke_sts2.py
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -80,6 +81,7 @@ jobs:
           path: |
             research/live-smoke.json
             research/category-audit.json
+            research/sts2-smoke.json
           if-no-files-found: ignore
 
   release:

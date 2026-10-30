@@ -53,6 +53,29 @@
     ],
     "hint": "默认启用全部六款游戏。可用值：ys(原神)、sr(星穹铁道)、zzz(绝区零)、arknights(明日方舟)、zmd(终末地)、sts2(杀戮尖塔2)；已有配置保留，可按需删减。空列表或无有效游戏时回退为全部启用"
   },
+  "spire_codex_base": {
+    "description": "Spire Codex 接口地址",
+    "type": "string",
+    "default": "https://spire-codex.com",
+    "hint": "杀戮尖塔2 数据源根地址（插件会追加 /api）；可改为自建 Spire Codex 实例。留空使用官方地址"
+  },
+  "spire_codex_cdn": {
+    "description": "Spire Codex 图片 CDN 地址",
+    "type": "string",
+    "default": "https://cdn.spire-codex.com",
+    "hint": "角色立绘等图片地址；自建实例未托管图片时可改为自有 CDN。留空使用官方 CDN"
+  },
+  "sts2_page_cache_seconds": {
+    "description": "杀戮尖塔2 正文缓存有效期（秒）",
+    "type": "int",
+    "default": 3600,
+    "hint": "600–86400 秒；EA 期默认 1 小时，低于其他游戏的全局正文缓存",
+    "slider": {
+      "min": 600,
+      "max": 86400,
+      "step": 600
+    }
+  },
   "timeout_seconds": {
     "description": "单次请求超时（秒）",
     "type": "float",

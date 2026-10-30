@@ -173,12 +173,35 @@ def make_service(tmp_path, calls=None):
             if payload is not None and (lang == "zhs" or q == "Bash"):
                 return httpx.Response(200, json=payload)
             return httpx.Response(200, json={"query": q, "categories": []})
+        if path == "/api/changelogs":
+            return httpx.Response(200, json=[{"game_version": "1.3.1", "tag": "1.3.1"}])
         if path == "/api/cards":
             return httpx.Response(200, json=CARDS)
+        if path.startswith("/api/cards/"):
+            key = path.rsplit("/", 1)[-1].upper()
+            entity = next((item for item in CARDS if item["id"] == key), None)
+            return httpx.Response(
+                200 if entity else 404,
+                json=entity or {"detail": "Not Found"},
+            )
         if path == "/api/relics":
             return httpx.Response(200, json=RELICS)
+        if path.startswith("/api/relics/"):
+            key = path.rsplit("/", 1)[-1].upper()
+            entity = next((item for item in RELICS if item["id"] == key), None)
+            return httpx.Response(
+                200 if entity else 404,
+                json=entity or {"detail": "Not Found"},
+            )
         if path == "/api/characters":
             return httpx.Response(200, json=CHARACTERS)
+        if path.startswith("/api/characters/"):
+            key = path.rsplit("/", 1)[-1].upper()
+            entity = next((item for item in CHARACTERS if item["id"] == key), None)
+            return httpx.Response(
+                200 if entity else 404,
+                json=entity or {"detail": "Not Found"},
+            )
         return httpx.Response(404, json={"detail": "Not Found"})
 
     client = SpireCodexClient(
@@ -196,17 +219,46 @@ def test_profile_source_and_page_id_contract():
     assert page_id != entry_id("relic", "STRIKE_IRONCLAD")
 
 
-def test_character_and_encounter_labels_and_images():
+def test_character_and_encounter_labels_and_images(tmp_path):
     assert (
         SpireCodexService._label(
             {"name": "一大群史莱姆", "kind": "encounter", "subtitle": "Monster"}
         )
         == "一大群史莱姆 · 普通战斗"
     )
-    assert (
-        SpireCodexService._image_url("character", {"id": "IRONCLAD"})
-        == "https://cdn.spire-codex.com/characters/combat_ironclad.webp"
-    )
+    service, client, _ = make_service(tmp_path)
+    try:
+        assert (
+            service._image_url("character", {"id": "IRONCLAD"})
+            == "https://cdn.spire-codex.com/characters/combat_ironclad.webp"
+        )
+    finally:
+        asyncio.run(client.close())
+
+
+def test_custom_base_and_version_marker(tmp_path):
+    service, client, _ = make_service(tmp_path)
+    try:
+        service.base = "https://example.test"
+        service.cdn = "https://cdn.example.test"
+        assert (
+            service._url("relic", "BURNING_BLOOD")
+            == "https://example.test/zhs/relics/burning_blood"
+        )
+        assert (
+            service._image_url("character", {"id": "IRONCLAD"})
+            == "https://cdn.example.test/characters/combat_ironclad.webp"
+        )
+
+        service._version_value = "old"
+        service._indexes[("card", "zhs")] = [{"id": "STALE"}]
+        service._known[1] = ("card", "STALE")
+        value = asyncio.run(service._version())
+        assert value == "1.3.1"
+        assert service._indexes == {}
+        assert service._known == {}
+    finally:
+        asyncio.run(client.close())
 
 
 def test_bbcode_and_empty_values_are_cleaned():
@@ -275,7 +327,7 @@ def test_read_resolves_page_id_through_the_kind_index(tmp_path):
     assert result["title"] == "打击"
     assert "数值" in result["available_sections"]
     assert any("6" in item["text"] for item in result["evidence"])
-    assert ("/api/cards", "zhs", None) in calls
+    assert ("/api/cards/strike_ironclad", "zhs", None) in calls
 
 
 def test_character_initial_deck_resolves_pascal_case_ids(tmp_path):
@@ -310,7 +362,7 @@ def test_english_query_searches_eng_then_reads_chinese(tmp_path):
     assert result["status"] == "ok"
     assert result["title"] == "重击"
     assert ("/api/search", "eng", "Bash") in calls
-    assert ("/api/cards", "zhs", None) in calls
+    assert ("/api/cards/bash", "zhs", None) in calls
 
 
 def test_repeated_search_uses_cache_and_in_memory_index(tmp_path):

@@ -55,6 +55,8 @@
 | `zmd` | 明日方舟：终末地 | `/zmd` | [AKEData](https://www.akedata.wiki/) | [终末地 BWIKI](https://wiki.biligame.com/zmd/) | 优先 AKEData 结构化数据，未收录内容回退 |
 | `sts2` | 杀戮尖塔2 | `/sts2` | [Spire Codex](https://spire-codex.com/) | — | 卡牌、遗物、药水、怪物、事件、角色；官方简体中文数据 |
 
+> 杀戮尖塔2 数据来自社区反编译项目 [Spire Codex](https://spire-codex.com/)，非 Mega Crit 官方服务，无可用性 SLA；游戏数据版权归 Mega Crit。可通过 `spire_codex_base` 指向自建实例。该游戏目前没有可服务端访问的备用源，上游故障时会明确报错而不是静默回退。
+
 ---
 
 ## 安装方法
@@ -137,6 +139,9 @@ AI 工具路径全面接入黑话归一化逻辑，大模型对话中调用工�
 | 配置项 | 默认值 | 说明 |
 |---|:---:|---|
 | `games` | `["ys", "sr", "zzz", "arknights", "zmd", "sts2"]` | 启用的游戏列表。可按需删减，空列表自动回退为全部启用 |
+| `spire_codex_base` | `https://spire-codex.com` | 杀戮尖塔2 接口根地址（插件追加 `/api`）；可改为自建实例，留空使用官方地址 |
+| `spire_codex_cdn` | `https://cdn.spire-codex.com` | 杀戮尖塔2 图片 CDN；自建实例未托管图片时可替换 |
+| `sts2_page_cache_seconds` | `3600` | 杀戮尖塔2 正文缓存有效期；EA 期默认 1 小时 |
 | `model_provider` | `""` (留空) | 插件专属模型：留空跟随会话聊天模型；下拉指定后固定使用该模型，失败自动回退会话模型 |
 | `model_timeout_seconds` | `20` | 单次大模型调用超时（2–60 秒） |
 | `overview_chars` | `250` | 命令模型概览目标字数（150–500 字，附证据卡片时正文自动精简） |

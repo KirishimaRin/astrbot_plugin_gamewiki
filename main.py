@@ -61,6 +61,9 @@ class GameWiki(Star):
         self.model_timeout = number("model_timeout_seconds", 20, 2, 60)
         # 空串=跟随会话当前模型；否则固定使用该服务提供商。
         self.model_provider = str(config.get("model_provider", "") or "").strip()
+        # 杀戮尖塔2 可切换到自建 Spire Codex 实例；空串使用官方地址。
+        self.spire_codex_base = str(config.get("spire_codex_base", "") or "").strip()
+        self.spire_codex_cdn = str(config.get("spire_codex_cdn", "") or "").strip()
         self.model_fallback_hits = 0
         self.overview_chars = int(number("overview_chars", 250, 150, 500))
         data_root = Path(get_astrbot_data_path()) / "plugin_data"
@@ -151,6 +154,7 @@ class GameWiki(Star):
                     number("timeout_seconds", 8, 2, 15),
                     concurrency=int(number("upstream_concurrency", 2, 1, 8)),
                     pace=number("upstream_pace_seconds", 0.3, 0.1, 2),
+                    base=self.spire_codex_base,
                 )
                 self.clients.append(client)
                 self.services[code] = SpireCodexService(
@@ -158,8 +162,11 @@ class GameWiki(Star):
                     aliases={**global_aliases, **game_aliases.get(code, {})},
                     timeout=number("query_timeout_seconds", 15, 5, 30),
                     search_ttl=number("search_cache_seconds", 600, 0, 3600),
-                    page_ttl=number("page_cache_seconds", 21600, 0, 86400),
+                    # EA 期数据变动快，sts2 详情默认 1 小时而非全局 6 小时。
+                    page_ttl=number("sts2_page_cache_seconds", 3600, 600, 86400),
                     max_chars=int(number("max_evidence_chars", 6000, 1000, 8000)),
+                    base=self.spire_codex_base,
+                    cdn=self.spire_codex_cdn,
                 )
             else:
                 self.services[code] = build_service(code, "bwiki")

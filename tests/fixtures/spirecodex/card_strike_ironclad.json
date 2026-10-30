@@ -1,0 +1,45 @@
+{
+ "id": "STRIKE_IRONCLAD",
+ "name": "打击",
+ "description": "造成6点伤害。",
+ "description_raw": "造成{Damage:diff()}点伤害。",
+ "cost": 1,
+ "is_x_cost": null,
+ "is_x_star_cost": null,
+ "star_cost": null,
+ "type": "攻击",
+ "type_key": "Attack",
+ "rarity": "基础",
+ "rarity_key": "Basic",
+ "target": "AnyEnemy",
+ "color": "ironclad",
+ "damage": 6,
+ "block": null,
+ "hit_count": null,
+ "powers_applied": null,
+ "cards_draw": null,
+ "energy_gain": null,
+ "hp_loss": null,
+ "keywords": null,
+ "keywords_key": null,
+ "tags": [
+  "Strike"
+ ],
+ "spawns_cards": null,
+ "vars": {
+  "Damage": 6
+ },
+ "upgrade": {
+  "damage": "+3"
+ },
+ "upgrade_description": "造成9点伤害。",
+ "image_url": "/static/images/cards/strike_ironclad.webp",
+ "beta_image_url": null,
+ "type_variants": null,
+ "can_be_generated_in_combat": null,
+ "multiplayer_only": null,
+ "compendium_order": 72,
+ "sources": null,
+ "image_url_card": "https://cdn.spire-codex.com/cards-full/stable/strike_ironclad.webp",
+ "image_url_card_upg": "https://cdn.spire-codex.com/cards-full/stable/strike_ironclad_upg.webp"
+}

@@ -9,7 +9,10 @@ client while reusing its pacing, retry, cache and request coalescing.
 import asyncio
 import hashlib
 import re
+import time
 from datetime import datetime, timezone
+
+import httpx
 
 from .client import WikiClient
 from .games import STS2
@@ -17,6 +20,8 @@ from .models import Section, WikiError
 from .selection import evidence
 
 BASE = "https://spire-codex.com"
+CDN = "https://cdn.spire-codex.com"
+VERSION_TTL = 3600
 
 # Internal singular kind -> API path segment.
 PATHS = {
@@ -38,6 +43,20 @@ PATHS = {
 # integer range; the kind can be recovered without a process-local map.
 KIND_CODES = {kind: index + 1 for index, kind in enumerate(PATHS)}
 KIND_BY_CODE = {code: kind for kind, code in KIND_CODES.items()}
+
+# 用户可能在实体名前加类型词（“遗物 燃烧之血”）。服务层剥离它，
+# 让没有模型兜底的命令路径也能命中正确类别。
+KIND_WORDS = (
+    ("卡牌", "card"),
+    ("遗物", "relic"),
+    ("药水", "potion"),
+    ("怪物", "monster"),
+    ("敌人", "monster"),
+    ("遭遇", "encounter"),
+    ("事件", "event"),
+    ("能力", "power"),
+    ("角色", "character"),
+)
 
 CHARACTERS = {
     "ironclad": "铁甲战士",
@@ -128,8 +147,11 @@ def entry_id(kind: str, key) -> int:
 
 
 class SpireCodexClient(WikiClient):
-    def __init__(self, cache, *args, **kwargs):
+    def __init__(self, cache, *args, base="", **kwargs):
         super().__init__(cache, *args, game="sts2", source="spirecodex", **kwargs)
+        if base:
+            self.api = base.rstrip("/")
+            self._host = httpx.URL(self.api).host
 
     def _validate_payload(self, result):
         if isinstance(result, list):
@@ -148,7 +170,7 @@ class SpireCodexClient(WikiClient):
         if not isinstance(path, str) or not path.startswith("/api/"):
             raise WikiError("bad_input", "不支持的 Spire Codex 数据地址。")
         query = {key: value for key, value in params.items() if key != "path"}
-        return await self._read_json(BASE + path, query, 8 << 20)
+        return await self._read_json(self.api + path, query, 8 << 20)
 
 
 class SpireCodexService:
@@ -158,9 +180,11 @@ class SpireCodexService:
         *,
         aliases=None,
         search_ttl=600,
-        page_ttl=21600,
+        page_ttl=3600,
         max_chars=6000,
         timeout=15,
+        base="",
+        cdn="",
     ):
         self.client = client
         # SourceRouter exposes the primary's profile for question
@@ -170,14 +194,48 @@ class SpireCodexService:
         self.aliases = {**STS2.site_aliases, **(aliases or {})}
         self.search_ttl, self.page_ttl = search_ttl, page_ttl
         self.max_chars, self.timeout = max_chars, timeout
+        self.base = (base or BASE).rstrip("/")
+        self.cdn = (cdn or CDN).rstrip("/")
         self._indexes: dict[tuple[str, str], list] = {}
+        # page_id -> (kind, id) for the current process. Search populates it;
+        # read then fetches one detail instead of the whole kind list.
+        self._known: dict[int, tuple[str, str]] = {}
+        self._data_version = ""
+        self._version_value = ""
+        self._version_time = 0.0
 
     def stats(self):
         return self.client.stats()
 
     async def clear_parse_cache(self):
         self._indexes.clear()
+        self._known.clear()
         return 0
+
+    async def _version(self) -> str:
+        """Read the latest data marker, clearing indexes when it changes.
+
+        Spire Codex exposes no stable game-version field; the newest
+        changelog's game_version is the closest public marker. A failed
+        lookup must not break queries, so it falls back to the last value.
+        """
+        now = time.monotonic()
+        if self._version_time and now - self._version_time < VERSION_TTL:
+            return self._data_version
+        try:
+            data = await self.client.get("/api/changelogs", {}, VERSION_TTL)
+            latest = data[0] if isinstance(data, list) and data else {}
+            value = str(latest.get("game_version") or latest.get("tag") or "")
+        except WikiError:
+            value = ""
+        if value and value != self._version_value:
+            self._indexes.clear()
+            self._known.clear()
+        if value:
+            self._version_value = value
+            self._data_version = value
+        self._version_time = now
+        return self._data_version
 
     @staticmethod
     def _validate(question, section=""):
@@ -214,23 +272,25 @@ class SpireCodexService:
             ) from None
 
     async def _search(self, query, question):
+        version = await self._version()
+        original = query
+        query, prefix_kind = self._split_kind_prefix(query)
         normalized = self.aliases.get(query, query)
-        lang = "zhs" if CJK.search(normalized) else "eng"
-        data = await self.client.get(
-            "/api/search", {"q": normalized, "lang": lang}, self.search_ttl
-        )
-        items = self._items(data)
-        if not items and lang != "zhs":
-            # An English query may still be a Chinese name, and vice versa.
+        data = None
+        items = []
+        for lang in self._langs(normalized):
             data = await self.client.get(
-                "/api/search", {"q": normalized, "lang": "zhs"}, self.search_ttl
+                "/api/search", {"q": normalized, "lang": lang}, self.search_ttl
             )
             items = self._items(data)
+            if items:
+                break
         base = {
-            "query": query,
+            "query": original,
             "normalized_query": normalized,
             "question": question,
             "game": "sts2",
+            "data_version": version,
         }
         if not items:
             return {
@@ -240,13 +300,13 @@ class SpireCodexService:
             }
         wanted = name_key(normalized)
         exact = [item for item in items if name_key(item["name"]) == wanted]
-        hint = self._kind_hint(question)
+        hint = prefix_kind or self._kind_hint(question)
         if exact and hint:
             preferred = [item for item in exact if item["kind"] == hint]
             if preferred:
                 exact = preferred
         if len(exact) == 1:
-            entity = await self._find(exact[0]["kind"], exact[0]["id"])
+            entity = await self._detail(exact[0]["kind"], exact[0]["id"])
             if entity is None:
                 return {
                     **base,
@@ -265,15 +325,39 @@ class SpireCodexService:
         if exact:
             # 同名实体（五名角色的“打击”）确实存在，不能说“没有同名条目”。
             payload["choice_intro"] = (
-                f"找到多个与「{query}」相关的条目，请回复编号选择："
+                f"找到多个与「{original}」相关的条目，请回复编号选择："
             )
         return payload
+
+    @staticmethod
+    def _split_kind_prefix(query):
+        for word, kind in KIND_WORDS:
+            if query.startswith(word) and len(query) > len(word):
+                rest = query[len(word) :].lstrip(" ·:：,，")
+                if rest:
+                    return rest, kind
+        return query, ""
+
+    @staticmethod
+    def _langs(text):
+        langs = []
+        if CJK.search(text):
+            langs.append("zhs")
+        if re.search(r"[A-Za-z]", text):
+            langs.append("eng")
+        if not langs:
+            langs = ["zhs"]
+        # Pure English still tries Chinese; pure Chinese does not fan out.
+        if langs == ["eng"]:
+            langs.append("zhs")
+        return tuple(dict.fromkeys(langs))
 
     @staticmethod
     def _items(data):
         if not isinstance(data, dict):
             return []
         items = []
+        seen = set()
         for category in data.get("categories", []):
             kind = category.get("kind", "")
             path_name = PATHS.get(kind)
@@ -283,6 +367,10 @@ class SpireCodexService:
                 match = re.fullmatch(r"/([a-z]+)/([^/?#]+)", item.get("path", ""))
                 if not match or match[1] != path_name:
                     continue
+                identity = (kind, match[2].casefold())
+                if identity in seen:
+                    continue
+                seen.add(identity)
                 items.append(
                     {
                         "kind": kind,
@@ -299,7 +387,20 @@ class SpireCodexService:
             ("card", ("卡牌", "卡", "牌")),
             ("relic", ("遗物",)),
             ("potion", ("药水",)),
-            ("monster", ("怪物", "敌人", "Boss", "boss")),
+            (
+                "monster",
+                (
+                    "怪物",
+                    "敌人",
+                    "Boss",
+                    "boss",
+                    "出招",
+                    "招式",
+                    "意图",
+                    "血量",
+                    "生命值",
+                ),
+            ),
             ("encounter", ("遭遇",)),
             ("event", ("事件",)),
             ("power", ("能力",)),
@@ -310,9 +411,11 @@ class SpireCodexService:
         return ""
 
     def _candidate(self, item):
+        page_id = entry_id(item["kind"], item["id"])
+        self._known[page_id] = (item["kind"], item["id"])
         return {
             "title": self._label(item),
-            "page_id": entry_id(item["kind"], item["id"]),
+            "page_id": page_id,
             "url": self._url(item["kind"], item["id"]),
         }
 
@@ -349,25 +452,19 @@ class SpireCodexService:
         detail = " · ".join(part for part in parts if part)
         return f"{name} · {detail}" if detail else name
 
-    @staticmethod
-    def _url(kind, key):
-        return f"{BASE}/zhs/{PATHS[kind]}/{str(key).lower()}"
+    def _url(self, kind, key):
+        return f"{self.base}/zhs/{PATHS[kind]}/{str(key).lower()}"
 
-    @staticmethod
-    def _image_url(kind, entity):
+    def _image_url(self, kind, entity):
         if kind == "card":
             return entity.get("image_url_card") or ""
         if kind == "character":
             key = str(entity.get("id", "")).lower()
             # Character payloads carry no image field; the site serves the
             # combat pose used on character pages.
-            return (
-                f"https://cdn.spire-codex.com/characters/combat_{key}.webp"
-                if key
-                else ""
-            )
+            return f"{self.cdn}/characters/combat_{key}.webp" if key else ""
         image = entity.get("image_url") or ""
-        return BASE + image if image.startswith("/") else image
+        return self.base + image if image.startswith("/") else image
 
     async def _index(self, kind, lang):
         key = (kind, lang)
@@ -390,7 +487,22 @@ class SpireCodexService:
             None,
         )
 
+    async def _detail(self, kind, key):
+        data = await self.client.get(
+            f"/api/{PATHS[kind]}/{str(key).lower()}", {"lang": "zhs"}, self.page_ttl
+        )
+        return data if isinstance(data, dict) else None
+
     async def _read(self, page_id, question, section):
+        await self._version()
+        known = self._known.get(page_id)
+        if known:
+            kind, key = known
+            entity = await self._detail(kind, key)
+            if entity is not None:
+                return await self._entry(kind, entity, question, section)
+        # After a restart the in-memory map is gone; resolve through the
+        # kind index instead of rejecting a still-valid page_id.
         kind = KIND_BY_CODE.get(page_id >> 48)
         if kind is None:
             raise WikiError("bad_input", "无效的 Spire Codex page_id。")
@@ -422,6 +534,8 @@ class SpireCodexService:
         await self._build_sections(kind, entity, add)
         title = entity.get("name") or entity.get("id") or "未知条目"
         url = self._url(kind, entity.get("id", ""))
+        page_id = entry_id(kind, entity.get("id", ""))
+        self._known[page_id] = (kind, str(entity.get("id", "")))
         snippets, truncated, selection = evidence(
             sections,
             question,
@@ -440,12 +554,12 @@ class SpireCodexService:
             "source": "杀戮尖塔2 Spire Codex",
             "source_key": "spirecodex",
             "title": title,
-            "page_id": entry_id(kind, entity.get("id", "")),
+            "page_id": page_id,
             "url": url,
             "source_urls": [url],
             "image_url": self._image_url(kind, entity),
             "revision_id": 0,
-            "data_version": "",
+            "data_version": self._data_version,
             "published_at": "",
             "fetched_at": datetime.now(timezone.utc).isoformat(),
             "available_sections": list(dict.fromkeys(item.title for item in sections)),
@@ -630,6 +744,9 @@ class SpireCodexService:
         pattern = entity.get("attack_pattern") or {}
         if pattern.get("description"):
             add("攻击模式", [clean(pattern["description"])])
+        sequence = self._attack_pattern_lines(entity, pattern)
+        if sequence:
+            add("出招顺序", sequence)
         innate = entity.get("innate_powers") or []
         if innate:
             add(
@@ -641,6 +758,65 @@ class SpireCodexService:
                     for item in innate
                 ],
             )
+
+    @staticmethod
+    def _attack_pattern_lines(entity, pattern):
+        states = pattern.get("states") or []
+        if not states:
+            return []
+        names = {
+            str(move.get("id")): move.get("name") or "未知招式"
+            for move in entity.get("moves") or []
+        }
+        by_id = {str(state.get("id")): state for state in states}
+        lines, seen = [], set()
+        current = pattern.get("initial_move") or states[0].get("id")
+        while (
+            current
+            and str(current) in by_id
+            and str(current) not in seen
+            and len(lines) < 6
+        ):
+            seen.add(str(current))
+            state = by_id[str(current)]
+            move_id = state.get("move_id")
+            if move_id:
+                name = names.get(str(move_id), "未知招式")
+                prefix = "首回合：" if state.get("must_perform_once") else ""
+                lines.append(f"{prefix}{name}")
+            elif state.get("branches"):
+                options = [
+                    names.get(str(branch.get("move_id")), "未知招式")
+                    for branch in state["branches"][:4]
+                ]
+                options = list(dict.fromkeys(item for item in options if item))
+                if options:
+                    lines.append("按条件选择：" + " / ".join(options))
+            current = state.get("next")
+        for state in states:
+            if len(lines) >= 6:
+                break
+            if str(state.get("id")) in seen:
+                continue
+            move_id = state.get("move_id")
+            if move_id:
+                name = names.get(str(move_id), "未知招式")
+                prefix = "仅一次：" if state.get("must_perform_once") else ""
+                lines.append(f"{prefix}{name}")
+            elif state.get("branches"):
+                options = [
+                    names.get(str(branch.get("move_id")), "未知招式")
+                    for branch in state["branches"][:4]
+                ]
+                options = list(dict.fromkeys(item for item in options if item))
+                if options:
+                    lines.append("按条件选择：" + " / ".join(options))
+        lines = list(dict.fromkeys(lines))
+        if pattern.get("type") == "random" and len(lines) > 1:
+            lines.insert(0, "随机使用以下招式：")
+        elif pattern.get("type") == "conditional" and len(lines) > 1:
+            lines.insert(0, "按条件选择以下招式：")
+        return lines[:7]
 
     def _event_sections(self, entity, add):
         info = []
@@ -664,6 +840,33 @@ class SpireCodexService:
                     for item in options
                 ],
             )
+        pages = entity.get("pages") or []
+        branches, seen_pages, seen_options = [], set(), set()
+        for page in pages:
+            page_id = str(page.get("id") or "")
+            if not page_id or page_id in {"INITIAL", "FINISH"} or page_id in seen_pages:
+                continue
+            page_options = page.get("options") or []
+            if not page_options:
+                continue
+            seen_pages.add(page_id)
+            description = clean(page.get("description") or "")
+            if description:
+                branches.append(
+                    description[:120] + ("…" if len(description) > 120 else "")
+                )
+            for option in page_options[:3]:
+                title = clean(option.get("title"))
+                text = clean(option.get("description"))
+                signature = (title, text)
+                if signature in seen_options:
+                    continue
+                seen_options.add(signature)
+                branches.append("　" + (f"{title}：{text}" if text else title))
+            if len(seen_pages) >= 3:
+                break
+        if branches:
+            add("分支", branches)
 
     async def _character_sections(self, entity, add):
         info = [clean(entity.get("description") or "")]
