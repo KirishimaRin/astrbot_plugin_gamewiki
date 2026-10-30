@@ -53,7 +53,7 @@
 | `zzz` | 绝区零 | `/zzz` | [绝区零 BWIKI](https://wiki.biligame.com/zzz/) | — | 代理人、音擎、驱动盘、影画、调频聚合页 |
 | `arknights` | 明日方舟 | `/ark` | [PRTS.Wiki](https://prts.wiki/) | [方舟 BWIKI](https://wiki.biligame.com/arknights/) | 优先 PRTS（卡池一览与寻访规则），超时回退 |
 | `zmd` | 明日方舟：终末地 | `/zmd` | [AKEData](https://www.akedata.wiki/) | [终末地 BWIKI](https://wiki.biligame.com/zmd/) | 优先 AKEData 结构化数据，未收录内容回退 |
-| `sts2` | 杀戮尖塔2 | `/sts2` | [Spire Codex](https://spire-codex.com/) | — | 卡牌、遗物、药水、怪物、事件、角色；官方简体中文数据 |
+| `sts2` | 杀戮尖塔2 | `/sts2` | [Spire Codex](https://spire-codex.com/) | — | 卡牌、遗物、药水、怪物、事件、角色、术语/充能球/苦痛/关键词/附魔；卡牌与遗物搭配、推荐与社区胜率 |
 
 > 杀戮尖塔2 数据来自社区反编译项目 [Spire Codex](https://spire-codex.com/)，非 Mega Crit 官方服务，无可用性 SLA；游戏数据版权归 Mega Crit。可通过 `spire_codex_base` 指向自建实例。该游戏目前没有可服务端访问的备用源，上游故障时会明确报错而不是静默回退。
 

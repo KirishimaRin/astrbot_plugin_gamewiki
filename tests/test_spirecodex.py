@@ -58,6 +58,7 @@ def card(key, name, color, **extra):
 CARDS = [card(f"STRIKE_{color.upper()}", "打击", color) for color in COLORS] + [
     card("DEFEND_IRONCLAD", "防御", "ironclad", block=5, damage=None),
     card("BASH", "重击", "ironclad", damage=8),
+    card("INFLAME", "燃烧", "ironclad", damage=None, description="获得2点力量。"),
 ]
 RELICS = [
     {
@@ -91,7 +92,42 @@ CHARACTERS = [
         "unlocks_after": None,
     }
 ]
+GLOSSARY = [
+    {
+        "id": "BLOCK",
+        "name": "格挡",
+        "description": "在下个回合前，阻挡伤害。",
+        "category": "combat",
+    }
+]
+ORBS = [
+    {
+        "id": "DARK_ORB",
+        "name": "黑暗",
+        "description": "被动：回合结束时，将这个充能球的伤害增加6。",
+        "description_raw": "被动：回合结束时，将这个充能球的伤害增加{Passive}。",
+        "image_url": "/static/images/orbs/dark_orb.png",
+    }
+]
 SEARCH = {
+    "格挡": {
+        "query": "格挡",
+        "categories": [
+            {
+                "kind": "reference",
+                "items": [{"name": "守势", "path": "/reference", "subtitle": "Intent"}],
+            }
+        ],
+    },
+    "黑暗": {
+        "query": "黑暗",
+        "categories": [
+            {
+                "kind": "reference",
+                "items": [{"name": "黑暗", "path": "/reference", "subtitle": "Orb"}],
+            }
+        ],
+    },
     "燃烧之血": {
         "query": "燃烧之血",
         "categories": [
@@ -202,12 +238,56 @@ def make_service(tmp_path, calls=None):
                 200 if entity else 404,
                 json=entity or {"detail": "Not Found"},
             )
+        if path == "/api/glossary":
+            return httpx.Response(200, json=GLOSSARY)
+        if path == "/api/glossary/block":
+            return httpx.Response(200, json=GLOSSARY[0])
+        if path == "/api/orbs":
+            return httpx.Response(200, json=ORBS)
+        if path == "/api/orbs/dark_orb":
+            return httpx.Response(200, json=ORBS[0])
+        if path in {"/api/afflictions", "/api/keywords", "/api/enchantments"}:
+            return httpx.Response(200, json=[])
+        if path == "/api/pairings/cards/inflame":
+            return httpx.Response(
+                200,
+                json={
+                    "partners": {
+                        "cards": [
+                            {
+                                "id": "SETUP_STRIKE",
+                                "name": "预备打击",
+                                "winrate": 0.3665,
+                                "co": 15741,
+                            }
+                        ]
+                    }
+                },
+            )
+        if path == "/api/draft-recs/cards/inflame":
+            return httpx.Response(
+                200,
+                json={
+                    "recommends": [
+                        {
+                            "id": "CELESTIAL_MIGHT",
+                            "name": "天穹之力",
+                            "pref": 0.159,
+                            "winrate": 0.4762,
+                        }
+                    ]
+                },
+            )
+        if path == "/api/runs/scores/cards":
+            return httpx.Response(
+                200, json={"INFLAME": {"win_rate": 43.6, "picks": 100, "score": 80}}
+            )
         return httpx.Response(404, json={"detail": "Not Found"})
 
     client = SpireCodexClient(
         Cache(tmp_path), timeout=2, transport=httpx.MockTransport(handler)
     )
-    return SpireCodexService(client, timeout=2), client, calls
+    return SpireCodexService(client, timeout=10), client, calls
 
 
 def test_profile_source_and_page_id_contract():
@@ -379,6 +459,59 @@ def test_repeated_search_uses_cache_and_in_memory_index(tmp_path):
 
     first, second = asyncio.run(run())
     assert first == second, "a repeated query must not hit the upstream again"
+
+
+def test_community_sections_are_fetched_for_recommendation_questions(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            result = await service.read(entry_id("card", "INFLAME"), "", "搭配")
+            assert "搭配" in result["available_sections"]
+            assert "推荐" in result["available_sections"]
+            assert "胜率" in result["available_sections"]
+            pairing = "\n".join(item["text"] for item in result["evidence"])
+            assert "预备打击" in pairing and "36.6%" in pairing
+            draft = await service.read(entry_id("card", "INFLAME"), "", "推荐")
+            assert "天穹之力" in "\n".join(item["text"] for item in draft["evidence"])
+            score = await service.read(entry_id("card", "INFLAME"), "", "胜率")
+            assert "43.6%" in "\n".join(item["text"] for item in score["evidence"])
+        finally:
+            await client.close()
+
+    asyncio.run(run())
+
+
+def test_glossary_reference_falls_back_to_term(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            return await service.search("格挡", "")
+        finally:
+            await client.close()
+
+    result = asyncio.run(run())
+    assert result["status"] == "ok"
+    assert result["title"] == "格挡"
+    assert result["url"] == f"{BASE}/zhs/reference"
+    assert any("阻挡伤害" in item["text"] for item in result["evidence"])
+
+
+def test_orb_reference_falls_back_to_term(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            return await service.search("黑暗", "")
+        finally:
+            await client.close()
+
+    result = asyncio.run(run())
+    assert result["status"] == "ok"
+    assert result["title"] == "黑暗"
+    assert result["url"] == f"{BASE}/zhs/orbs/dark_orb"
+    assert result["image_url"] == f"{BASE}/static/images/orbs/dark_orb.png"
 
 
 def test_read_rejects_foreign_ids_and_sources(tmp_path):

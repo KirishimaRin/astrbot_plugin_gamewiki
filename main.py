@@ -565,7 +565,9 @@ class GameWiki(Star):
         await event.send(event.plain_result(notice + text))
         image_url = metrics.get("image_url") if isinstance(metrics, dict) else ""
         if self.image_reply and image_url:
-            await self._send_entry_image(event, image_url)
+            await self._send_entry_image(
+                event, image_url, convert_webp=profile.code == "sts2"
+            )
         card = metrics.get("card") if isinstance(metrics, dict) else None
         # The excerpt fallback already quotes the evidence verbatim; a card of
         # the same text would be a pure duplicate.
@@ -593,7 +595,9 @@ class GameWiki(Star):
         except Exception:
             logger.debug("证据卡片发送失败，忽略", exc_info=True)
 
-    async def _send_entry_image(self, event: AstrMessageEvent, image_url: str):
+    async def _send_entry_image(
+        self, event: AstrMessageEvent, image_url: str, *, convert_webp=False
+    ):
         key = (event.unified_msg_origin, image_url)
         now = time.monotonic()
         last = self._recent_images.get(key)
@@ -601,7 +605,8 @@ class GameWiki(Star):
             return
         try:
             async with self._image_slots:
-                async with prepared_image(image_url, self.cache) as image:
+                options = {"convert_webp": True} if convert_webp else {}
+                async with prepared_image(image_url, self.cache, **options) as image:
                     await event.send(event.image_result(image))
         except Exception:
             logger.debug("条目图片发送失败，忽略", exc_info=True)

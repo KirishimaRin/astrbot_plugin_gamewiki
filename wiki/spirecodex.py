@@ -37,7 +37,12 @@ PATHS = {
     "orb": "orbs",
     "affliction": "afflictions",
     "enchantment": "enchantments",
+    "glossary": "glossary",
 }
+
+# Types that /api/search often exposes only as a "reference" entry, or not
+# at all. Their list endpoints are small, so an exact-name fallback is cheap.
+TERM_KINDS = ("glossary", "orb", "affliction", "keyword", "enchantment")
 
 # 4-bit kind + 48-bit digest keeps page_id positive and inside JSON's safe
 # integer range; the kind can be recovered without a process-local map.
@@ -102,6 +107,26 @@ MOVE_INTENTS = {
 }
 POWER_TYPES = {"Buff": "增益", "Debuff": "减益"}
 STACK_TYPES = {"Counter": "可叠加", "Single": "不可叠加"}
+GLOSSARY_CATEGORIES = {
+    "combat": "战斗",
+    "progression": "进程",
+    "mechanics": "机制",
+    "zones": "区域",
+}
+CARD_TYPES = {"Attack": "攻击", "Skill": "技能", "Power": "能力"}
+PAIRING_TYPES = {"card": "cards", "relic": "relics"}
+COMMUNITY_WORDS = (
+    "搭配",
+    "配对",
+    "配合",
+    "推荐",
+    "选哪",
+    "选哪张",
+    "胜率",
+    "强度",
+    "评分",
+    "好用",
+)
 
 EMPTY_TAG = re.compile(r"\[([a-z_]+)\]\[/\1\]")
 TAG = re.compile(r"\[[^\[\]]{1,40}\]")
@@ -292,15 +317,26 @@ class SpireCodexService:
             "game": "sts2",
             "data_version": version,
         }
+        wanted = name_key(normalized)
+        exact = [item for item in items if name_key(item["name"]) == wanted]
+        hint = prefix_kind or self._kind_hint(question)
+        # Glossary/orb/affliction entries often appear only as a "reference"
+        # hit, or not in /api/search at all. Their lists are small enough to
+        # check by exact name before giving up.
+        has_reference = any(
+            category.get("kind") == "reference"
+            for category in (data or {}).get("categories", [])
+        )
+        if not exact and (not items or has_reference):
+            exact = await self._term_exact(wanted, hint)
+            if exact and not items:
+                items = exact
         if not items:
             return {
                 **base,
                 "status": "not_found",
                 "message": "Spire Codex 未找到相关条目。",
             }
-        wanted = name_key(normalized)
-        exact = [item for item in items if name_key(item["name"]) == wanted]
-        hint = prefix_kind or self._kind_hint(question)
         if exact and hint:
             preferred = [item for item in exact if item["kind"] == hint]
             if preferred:
@@ -381,6 +417,29 @@ class SpireCodexService:
                 )
         return items
 
+    async def _term_exact(self, wanted, hint=""):
+        order = TERM_KINDS
+        if hint in TERM_KINDS:
+            order = (hint,) + tuple(kind for kind in TERM_KINDS if kind != hint)
+        for kind in order:
+            try:
+                index = await self._index(kind, "zhs")
+            except WikiError:
+                continue
+            hits = [
+                {
+                    "kind": kind,
+                    "id": item.get("id", ""),
+                    "name": item.get("name", ""),
+                    "subtitle": item.get("category", ""),
+                }
+                for item in index
+                if isinstance(item, dict) and name_key(item.get("name", "")) == wanted
+            ]
+            if hits:
+                return hits
+        return []
+
     @staticmethod
     def _kind_hint(question):
         for kind, words in (
@@ -404,6 +463,11 @@ class SpireCodexService:
             ("encounter", ("遭遇",)),
             ("event", ("事件",)),
             ("power", ("能力",)),
+            ("glossary", ("术语",)),
+            ("orb", ("充能球",)),
+            ("affliction", ("苦痛",)),
+            ("keyword", ("关键词",)),
+            ("enchantment", ("附魔",)),
             ("character", ("角色", "人物")),
         ):
             if any(word in question for word in words):
@@ -447,12 +511,26 @@ class SpireCodexService:
         elif kind == "power":
             if subtitle:
                 parts.append(subtitle)
+        elif kind == "glossary":
+            parts.append("术语")
+        elif kind == "orb":
+            parts.append("充能球")
+        elif kind == "affliction":
+            parts.append("苦痛")
+        elif kind == "keyword":
+            parts.append("关键词")
+        elif kind == "enchantment":
+            parts.append("附魔")
         elif kind == "character":
             parts.append("角色")
         detail = " · ".join(part for part in parts if part)
         return f"{name} · {detail}" if detail else name
 
     def _url(self, kind, key):
+        if kind == "glossary":
+            # Glossary terms are listed on the reference page; there is no
+            # per-term frontend route.
+            return f"{self.base}/zhs/reference"
         return f"{self.base}/zhs/{PATHS[kind]}/{str(key).lower()}"
 
     def _image_url(self, kind, entity):
@@ -532,6 +610,10 @@ class SpireCodexService:
                 sections.append(Section(title, "", lines))
 
         await self._build_sections(kind, entity, add)
+        if kind in PAIRING_TYPES and any(
+            word in question + section for word in COMMUNITY_WORDS
+        ):
+            await self._community_sections(kind, entity, add)
         title = entity.get("name") or entity.get("id") or "未知条目"
         url = self._url(kind, entity.get("id", ""))
         page_id = entry_id(kind, entity.get("id", ""))
@@ -573,6 +655,90 @@ class SpireCodexService:
             ),
         }
 
+    @staticmethod
+    def _pct(value):
+        try:
+            return f"{float(value) * 100:.1f}%"
+        except (TypeError, ValueError):
+            return ""
+
+    async def _community_sections(self, kind, entity, add):
+        """Optional community data, fetched only for recommendation questions."""
+        plural = PAIRING_TYPES[kind]
+        key = str(entity.get("id", ""))
+        try:
+            data = await self.client.get(
+                f"/api/pairings/{plural}/{key.lower()}",
+                {"lang": "zhs"},
+                self.page_ttl,
+            )
+        except WikiError:
+            data = {}
+        lines = []
+        partners = data.get("partners") if isinstance(data, dict) else {}
+        if not isinstance(partners, dict):
+            partners = {}
+        for group in partners.values():
+            if not isinstance(group, list):
+                continue
+            for item in group[:3]:
+                if not isinstance(item, dict):
+                    continue
+                name = item.get("name") or item.get("id")
+                if not name:
+                    continue
+                extras = []
+                if item.get("winrate") is not None:
+                    extras.append(f"胜率 {self._pct(item['winrate'])}")
+                if item.get("co") is not None:
+                    extras.append(f"共现 {item['co']}")
+                lines.append(f"{name}（{'，'.join(extras)}）" if extras else name)
+        if lines:
+            add("搭配", lines[:4])
+        try:
+            data = await self.client.get(
+                f"/api/draft-recs/{plural}/{key.lower()}",
+                {"lang": "zhs"},
+                self.page_ttl,
+            )
+        except WikiError:
+            data = {}
+        lines = []
+        recommends = data.get("recommends") if isinstance(data, dict) else []
+        if not isinstance(recommends, list):
+            recommends = []
+        for item in recommends[:4]:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name") or item.get("id")
+            if not name:
+                continue
+            extras = []
+            if item.get("pref") is not None:
+                extras.append(f"选取率 {self._pct(item['pref'])}")
+            if item.get("winrate") is not None:
+                extras.append(f"胜率 {self._pct(item['winrate'])}")
+            lines.append(f"{name}（{'，'.join(extras)}）" if extras else name)
+        if lines:
+            add("推荐", lines)
+        try:
+            scores = await self.client.get(
+                f"/api/runs/scores/{plural}", {"lang": "zhs"}, self.page_ttl
+            )
+        except WikiError:
+            scores = {}
+        score = scores.get(key.upper()) if isinstance(scores, dict) else None
+        if isinstance(score, dict):
+            parts = []
+            if score.get("win_rate") is not None:
+                parts.append(f"综合胜率 {score['win_rate']}%")
+            if score.get("picks") is not None:
+                parts.append(f"选取 {score['picks']} 次")
+            if score.get("score") is not None:
+                parts.append(f"评分 {score['score']}")
+            if parts:
+                add("胜率", ["，".join(parts) + "。"])
+
     async def _build_sections(self, kind, entity, add):
         if kind == "card":
             self._card_sections(entity, add)
@@ -591,7 +757,7 @@ class SpireCodexService:
         elif kind == "power":
             self._power_sections(entity, add)
         else:
-            self._generic_sections(entity, add)
+            self._generic_sections(kind, entity, add)
 
     def _card_sections(self, entity, add):
         info = []
@@ -939,7 +1105,7 @@ class SpireCodexService:
         if desc:
             add("效果", [desc])
 
-    def _generic_sections(self, entity, add):
+    def _generic_sections(self, kind, entity, add):
         info = []
         for field, label in (
             ("type", "类型"),
@@ -952,8 +1118,24 @@ class SpireCodexService:
                 continue
             if isinstance(value, bool):
                 value = "是" if value else "否"
+            if field == "category":
+                value = GLOSSARY_CATEGORIES.get(value, value)
             info.append(f"{label}：{value}")
+        if kind == "affliction" and entity.get("extra_card_text"):
+            info.append("卡牌文本：" + clean(entity["extra_card_text"]))
+        if kind == "enchantment" and entity.get("card_type"):
+            card_type = entity["card_type"]
+            if isinstance(card_type, (list, tuple)):
+                card_type = "、".join(
+                    CARD_TYPES.get(str(item), str(item)) for item in card_type
+                )
+            else:
+                card_type = CARD_TYPES.get(str(card_type), clean(card_type))
+            info.append("适用卡牌：" + card_type)
         add("基本信息", info)
         desc = effect_text(entity)
         if desc:
+            # 术语/充能球/苦痛等条目没有“效果”以外的正文，简介也要带上，
+            # 否则裸名称查询只会看到分类字段。
+            add("基本信息", [desc])
             add("效果", [desc])

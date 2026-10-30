@@ -41,12 +41,15 @@ async def _download(url):
 
 
 @asynccontextmanager
-async def prepared_image(url, cache=None):
-    if not url.startswith(ASSETS + "characterportrait/"):
+async def prepared_image(url, cache=None, *, convert_webp=False):
+    portrait = url.startswith(ASSETS + "characterportrait/")
+    webp = convert_webp and url.lower().split("?", 1)[0].endswith(".webp")
+    if not portrait and not webp:
         yield url
         return
     # The file must survive until the platform has consumed event.send().
-    key = "akedata-portrait:" + hashlib.sha256(url.encode()).hexdigest()
+    prefix = "akedata-portrait:" if portrait else "spirecodex-image:"
+    key = prefix + hashlib.sha256(url.encode()).hexdigest()
     saved = await cache.get(key) if cache else None
     body = None
     if isinstance(saved, dict):
@@ -55,12 +58,20 @@ async def prepared_image(url, cache=None):
         except (KeyError, ValueError, TypeError):
             pass
     if not body:
-        body = await asyncio.wait_for(_download(url), timeout=30)
+        try:
+            body = await asyncio.wait_for(_download(url), timeout=30)
+        except Exception:
+            if webp:
+                # Fall back to the original URL; the platform may still
+                # support webp even when our conversion failed.
+                yield url
+                return
+            raise
         if cache:
             await cache.put(
                 key, {"jpeg": base64.b64encode(body).decode("ascii")}, 21600
             )
-    with tempfile.TemporaryDirectory(prefix="gamewiki-portrait-") as directory:
-        path = Path(directory) / "portrait.jpg"
+    with tempfile.TemporaryDirectory(prefix="gamewiki-image-") as directory:
+        path = Path(directory) / ("portrait.jpg" if portrait else "image.jpg")
         await asyncio.to_thread(path.write_bytes, body)
         yield str(path)

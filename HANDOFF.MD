@@ -145,7 +145,7 @@
 - 搜索会命中描述且同名实体多：`search` 必须精确名称优先；同名候选带角色/类型标签，并设置 `choice_intro`，不能沿用“没有同名条目”的默认文案。
 - BBCode：`clean()` 把 `[energy:N]` 转 `N费`、空强调对 `[blue][/blue]` 转 `X`；能力 `description` 可能丢数值，`effect_text` 先 `description` 后 `description_raw`。不要把 `[gold]` 等标签原样送进卡片或模型。
 - `_tool_read` 对 sts2 单独处理：source 留空或 `spirecodex`；不要走 `read_from_source`（它只认 bwiki 且会拒绝其他游戏）。
-- 验证：`pytest -q` 368 passed；Ruff 通过；framework 4.5.7/4.29.3 通过；package 34 files/11,105,027 bytes；真实 API 冒烟覆盖遗物、同名卡、怪物、事件分支、角色初始卡组、出招顺序、能力。
+- 验证：`pytest -q` 372 passed；Ruff 通过；framework 4.5.7/4.29.3 通过；package 34 files/11,107,629 bytes；真实 API 冒烟覆盖遗物、同名卡、怪物、事件分支、角色初始卡组、出招顺序、能力、术语、充能球、搭配与胜率。
 - 尚无备用源；Spire Codex 故障时只能明确报错。未改版本号。
 
 ## 杀戮尖塔2 计划内增强（2026-10-30）
@@ -156,4 +156,7 @@
 - 数据版本取 `/api/changelogs` 最新 `game_version`，缓存 1 小时；变化时清空 `_indexes` 与 `_known`。这是站点数据标记，不等于游戏 EA 版本号（`/api/beta/version` 才是 v0.11x 通道）。sts2 正文缓存默认 3600 秒，低于其他游戏的全局 6 小时。
 - `spire_codex_base` / `spire_codex_cdn` 可指向自建实例；客户端设置 base 后同步更新 `_host`，429 冷却按新主机隔离。
 - 真实响应 fixture 在 `tests/fixtures/spirecodex/`；`scripts/smoke_sts2.py` 做在线结构检查，已加入 CI `drift` 任务。
-- 仍未做：webp 转码兜底、glossary/reference、orb/affliction 列表兜底、draft/pairings/胜率、备用数据源。
+- 术语/充能球/苦痛/关键词/附魔：`/api/search` 常把它们归到 `reference` 或完全不返回；`_term_exact` 在 reference 或无结果时按精确名称查小型列表。术语链接统一指向 `/zhs/reference`，没有逐术语前端路由。通用分节把描述同时放进 `基本信息`，否则裸名称只显示分类字段。
+- 搭配/推荐/胜率：仅当问题含 `搭配/推荐/选哪/胜率/强度/评分` 时请求 `/api/pairings`、`/api/draft-recs`、`/api/runs/scores`；pairings/draft 的比率是 0–1，scores 的 `win_rate` 已是百分数，两者不能共用同一个格式化函数。
+- webp：`prepared_image(..., convert_webp=True)` 只对 sts2 启用；`_download` 仍负责下载与 JPEG 转换，转换失败时回退原始 URL。不要把该开关应用到其他游戏，避免不必要下载。
+- 仍未做：guides/mechanics 页面、备用数据源、完整平台 webp 发送验收。
