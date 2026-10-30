@@ -16,6 +16,17 @@ from .models import Page, WikiError, page_url
 # the exact-title match that decides whether a hit may be auto-read.
 TITLE_TRIM = re.compile(r"[\s。！？～，、；：…（）()\[\]【】「」『』\"'”’]+$")
 
+# 角色页才有的分节标记，用来区分角色与武器/道具页（配装子页只对角色有意义）。
+CHARACTER_SECTIONS = (
+    "属性数据",
+    "角色晋阶材料",
+    "技能升级材料",
+    "命之座",
+    "星魂",
+    "意象影画",
+    "角色故事",
+)
+
 ALIASES = {
     "草神": "纳西妲",
     "小草神": "纳西妲",
@@ -110,6 +121,15 @@ class QueryService:
         card = any(t in question + query for t in self.profile.card_words)
         if card and not normalized.startswith("卡牌："):
             normalized = "卡牌：" + normalized
+        # 道具名（方舟「寻访凭证」）含卡池关键词但本身是条目，不重定向。
+        pool_text = f"{query}\n{question}"
+        if not any(w in pool_text for w in self.profile.pool_exclude):
+            for words, page in self.profile.pool_pages:
+                if any(w in query or w in question for w in words):
+                    # 卡池/寻访类资讯不检索条目，固定读该游戏的池子
+                    # 聚合页（当前池、历史一览、卡池一览等分节）。
+                    normalized = page
+                    break
         exact = []
         if self.source == "prts":
             # PRTS full-text ranking can put the exact operator below subpages.
@@ -210,6 +230,27 @@ class QueryService:
         }
         focus = "" if question in {"", query, normalized} else question
         result.update(await self._read(hits[0]["pageid"], focus, ""))
+        # BWIKI 原神/星铁把配装推荐放在角色「/攻略」子页，主页只有跳转
+        # （原神）或干脆没有（星铁）。问句命中配装类方面词且当前页是
+        # 角色页时优先读子页；子页不存在就保留主页结果。
+        guide = self.profile.guide_suffix
+        if (
+            guide
+            and focus
+            and "/" not in hits[0]["title"]
+            and any(word in focus for word in self.profile.guide_aspects)
+            and any(
+                marker in result.get("available_sections", [])
+                for marker in CHARACTER_SECTIONS
+            )
+        ):
+            try:
+                sub = await self._read(hits[0]["title"] + guide, focus, "")
+            except WikiError:
+                sub = None
+            if sub and sub.get("status") == "ok":
+                result["resolved_from"] = result["url"]
+                result.update(sub)
         # Same-name item pages may point to a book chapter in their hatnote.
         # Follow only that exact chapter, once, for reading/content requests.
         wants_content = (

@@ -5,6 +5,13 @@
     "default": true,
     "hint": "按用户与会话隔离；候选2分钟、条目10分钟过期。允许直接回复编号或分节问题，关闭后仅使用完整名称查询"
   },
+  "model_provider": {
+    "description": "插件调用的模型",
+    "type": "string",
+    "default": "",
+    "_special": "select_provider",
+    "hint": "留空跟随 AstrBot 会话当前模型；从下拉框选择服务提供商后固定使用该模型。配置的模型不可用时自动回退会话模型，仍失败则返回原文摘录"
+  },
   "model_timeout_seconds": {
     "description": "每次模型调用超时（秒）",
     "type": "float",
@@ -20,7 +27,7 @@
     "description": "模型概览目标字数上限",
     "type": "int",
     "default": 250,
-    "hint": "150–500 字；材料和数值列表可适当超出以保留完整信息",
+    "hint": "150–500 字；材料和数值列表可适当超出以保留完整信息；附证据卡片的问题正文只保留一两句概括",
     "slider": {
       "min": 150,
       "max": 500,

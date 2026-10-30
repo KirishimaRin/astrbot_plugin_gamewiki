@@ -1,3 +1,3 @@
 """Framework-independent game wiki retrieval service."""
 
-VERSION = "0.2.5"
+VERSION = "0.3.0"

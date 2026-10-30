@@ -39,6 +39,20 @@ INTENTS = [
         (),
     ),
     (("推荐", "适合", "配队", "搭配"), ("推荐角色", "角色搭配推荐", "搭配"), ()),
+    # 配装类分节：原神/星铁在「<角色>/攻略」子页，绝区零在角色主页内联。
+    (
+        ("圣遗物", "遗器", "驱动盘"),
+        ("圣遗物", "遗器", "驱动盘套装", "驱动盘"),
+        (),
+    ),
+    (("武器", "光锥", "音擎", "专武"), ("武器", "光锥", "音擎推荐", "音擎"), ()),
+    # 原神/星铁没有独立词条分节，词条建议并入圣遗物/遗器分节。
+    (
+        ("词条", "副词条", "主词条"),
+        ("词条推荐", "词条", "圣遗物", "遗器", "驱动盘套装"),
+        (),
+    ),
+    (("配队", "阵容", "搭配"), ("阵容搭配", "角色搭配推荐", "搭配"), ()),
 ]
 
 # A level table is one that carries a level column header; LV10 must not
@@ -113,13 +127,13 @@ def evidence(
     )
     headings = tuple(h for _, names, _ in intents for h in names)
     fields = tuple(f for _, _, names in intents for f in names)
-    # A numeric/statistics question needs a table, not acquisition-only fields.
-    if len(intents) > 1:
-        fields = ()
     specific = next(
         (name for triggers, name in specifics if any(t in question for t in triggers)),
         "",
     )
+    # A mapping name may be a tuple when sources disagree on the same
+    # section (PRTS 后勤技能 vs BWIKI 基建技能).
+    specific_names = tuple(specific) if isinstance(specific, tuple) else (specific,)
     candidates = [s for s in sections if not section or section in s.title]
     # PRTS's parent skill section only lists unlock navigation. Its child
     # sections carry the actual skills, including skill 3.
@@ -149,6 +163,20 @@ def evidence(
             "omitted_sections": omitted,
         }
 
+    # A numeric/statistics question needs a table, not acquisition-only fields.
+    # Only intents whose headings exist on this page can contribute: the pool
+    # intents row matches generic words (当前/有什么) on every page, and
+    # counting it here would drop acquisition field filtering for ordinary
+    # questions such as "胡桃现在怎么获得".
+    page_parts = {p.strip() for s in candidates for p in s.title.split("/")}
+    contributing = [
+        entry
+        for entry in intents
+        if not entry[1] or any(h in page_parts for h in entry[1])
+    ]
+    if len(contributing) > 1:
+        fields = ()
+
     if section and not candidates:
         return [], False, meta("section", [])
     if specific:
@@ -158,7 +186,7 @@ def evidence(
             if (
                 any(part.strip().startswith("突破") for part in s.title.split("/"))
                 if specific == "突破"
-                else specific in s.title
+                else any(name in s.title for name in specific_names)
             )
         ]
         if subset:
@@ -187,7 +215,7 @@ def evidence(
         heading_score = max(
             (100 - i for i, h in enumerate(headings) if h in item.title), default=0
         )
-        if specific and specific in item.title:
+        if specific and any(name in item.title for name in specific_names):
             heading_score = max(heading_score, 100)
         return (
             heading_score
@@ -271,16 +299,72 @@ def evidence(
     return snippets, cut, meta(mode, [s["section"] for s in snippets], omitted)
 
 
+def _max_level(lines: list[str]) -> int | None:
+    """Resolve 满级 to the highest level the table itself carries."""
+    header = [v.strip() for v in lines[0].split("|")]
+    columns = [
+        int(m.group(1)) for cell in header if (m := re.fullmatch(r"LV(\d{1,2})", cell))
+    ]
+    if columns:
+        return max(columns)
+    for index, line in enumerate(lines):
+        cells = [v.strip() for v in line.split("|")]
+        if "等级" not in cells:
+            continue
+        values = []
+        for row in lines[index + 1 :]:
+            row_cells = [v.strip() for v in row.split("|")]
+            for col, name in enumerate(cells):
+                if (
+                    name == "等级"
+                    and col < len(row_cells)
+                    and (m := re.fullmatch(r"(\d{1,3})(?:级)?", row_cells[col]))
+                ):
+                    values.append(int(m.group(1)))
+        if values:
+            return max(values)
+    return None
+
+
+# 精炼等级只可能是 1~5；“精N”要求“精”后紧跟数字，不碰“精锻”“精粹”。
+REFINE_LEVEL = re.compile(r"精炼\s*([1-5])|精([1-5])(?!\d)")
+# BWIKI 原神武器页没有精炼分节：各精炼档数值以斜杠列表内联在条目首段
+# 武器技能里（“20%/25%/30%/35%/40%”）。精炼投影把每个五档列表替换成
+# 对应档的那一项；档数不是 5 的列表（日期、成对数值等）原样保留。
+REFINE_VALUES = re.compile(r"\d+(?:\.\d+)?(?:%|点)?(?:/\d+(?:\.\d+)?(?:%|点)?)+")
+
+
+def project_refine(block: str, level: int) -> str:
+    """Keep only the requested refinement rank of each inline rank list."""
+
+    def pick(match):
+        items = match.group(0).split("/")
+        return items[level - 1] if len(items) == 5 else match.group(0)
+
+    return REFINE_VALUES.sub(pick, block)
+
+
 def project_level(block: str, question: str) -> str:
     """Select a requested talent level while retaining its attribute column."""
+    refine = REFINE_LEVEL.search(question)
+    if refine:
+        return project_refine(block, int(refine.group(1) or refine.group(2)))
     match = re.search(r"(?:[lL][vV]\s*(\d{1,2})|(\d{1,2})\s*级)", question)
-    if not match or "\n" not in block:
+    maxed = bool(re.search(r"满级", question))
+    if (not match and not maxed) or "\n" not in block:
         return block
     # Explicit "LV10" is unambiguous; a bare "N级" needs talent/stat context.
-    if match.group(1) is None and not LEVEL_CONTEXT.search(question):
+    if (
+        match
+        and match.group(1) is None
+        and not LEVEL_CONTEXT.search(question)
+        and not maxed
+    ):
         return block
-    level = int(match.group(1) or match.group(2))
     lines = block.splitlines()
+    level = int(match.group(1) or match.group(2)) if match else _max_level(lines)
+    if level is None:
+        return block
     header = [v.strip() for v in lines[0].split("|")]
     wanted = f"LV{level}"
     if wanted not in header:

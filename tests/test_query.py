@@ -96,6 +96,30 @@ class TestQuery(unittest.IsolatedAsyncioTestCase):
         await QueryService(client).search("纳西妲", "七圣召唤卡牌技能")
         assert client.requests[-1]["srsearch"] == "卡牌：纳西妲"
 
+    async def test_pool_questions_redirect_to_the_pool_page(self):
+        # 问句或条目名命中 pool_pages 关键词时，检索改走固定聚合页；
+        # 问句命中（如追问当前池）与条目名命中都要覆盖。
+        for code, page in (("ys", "祈愿"), ("sr", "跃迁"), ("zzz", "调频")):
+            client = FakeClient([])
+            await QueryService(client, profile=PROFILES[code]).search("卡池", "")
+            assert client.requests[0]["srsearch"] == page, code
+            client = FakeClient([])
+            await QueryService(client, profile=PROFILES[code]).search(
+                "纳西妲", "当前卡池有什么"
+            )
+            assert client.requests[0]["srsearch"] == page, code
+        # PRTS 先做精确标题查找；(关键词, 页面) 按序匹配，先命中先用。
+        client = FakeClient([])
+        client.source = "prts"
+        await QueryService(client, profile=PROFILES["arknights"]).search("寻访保底", "")
+        assert client.requests[0]["titles"] == "寻访规则"
+        client = FakeClient([])
+        client.source = "prts"
+        await QueryService(client, profile=PROFILES["arknights"]).search(
+            "现在卡池有什么", ""
+        )
+        assert client.requests[0]["titles"] == "卡池一览"
+
     async def test_parsed_cache_tracks_fetched_timestamp(self):
         from unittest.mock import patch
 
@@ -338,3 +362,133 @@ class TestQuery(unittest.IsolatedAsyncioTestCase):
         assert result["status"] == "ok"
         assert result["evidence"], "fallback must return the best section"
         assert result["selection"]["mode"] == "fallback"
+
+    async def test_lowercase_up_pool_redirects_like_uppercase(self):
+        # "up池" 与 "UP池" 同样触发卡池聚合页重定向。
+        for code, page in (("ys", "祈愿"), ("sr", "跃迁"), ("zzz", "调频")):
+            client = FakeClient([])
+            await QueryService(client, profile=PROFILES[code]).search("up池", "")
+            assert client.requests[0]["srsearch"] == page, code
+
+
+class TestPoolWordCoverage(unittest.IsolatedAsyncioTestCase):
+    async def test_bare_up_and_pool_phrasings_redirect(self):
+        cases = (
+            ("ys", "胡桃", "现在up什么", "祈愿"),
+            ("ys", "武器池什么时候开", "", "祈愿"),
+            ("ys", "定轨怎么用", "", "祈愿"),
+            ("ys", "混池有哪些角色", "", "祈愿"),
+            ("sr", "下期池子是谁", "", "跃迁"),
+            ("zzz", "音擎池什么时候开", "", "调频"),
+        )
+        for code, query, question, page in cases:
+            client = FakeClient([])
+            await QueryService(client, profile=PROFILES[code]).search(query, question)
+            assert client.requests[0]["srsearch"] == page, (code, query, question)
+
+    async def test_ark_pool_words_redirect_to_the_hub(self):
+        client = FakeClient([])
+        client.source = "prts"
+        await QueryService(client, profile=PROFILES["arknights"]).search("下个池子", "")
+        assert client.requests[0]["titles"] == "卡池一览"
+
+    async def test_ark_pool_exclude_keeps_item_entries(self):
+        # 「寻访凭证」是道具条目，含“寻访”但不是卡池问题。
+        for query in ("寻访凭证", "寻访数据契约"):
+            client = FakeClient([])
+            client.source = "prts"
+            await QueryService(client, profile=PROFILES["arknights"]).search(
+                query, "怎么获得"
+            )
+            assert client.requests[0]["titles"] == query, query
+
+
+class TestGuideSubpage(unittest.IsolatedAsyncioTestCase):
+    """原神/星铁配装内容在「<角色>/攻略」子页，主页只有跳转或没有。"""
+
+    class GuideClient:
+        def __init__(self):
+            self.requests = []
+
+        async def request(self, params, ttl):
+            self.requests.append(params)
+            if params["action"] == "query":
+                return {"query": {"search": [{"title": "胡桃", "pageid": 1}]}}
+            if params.get("page") == "胡桃/攻略":
+                title, page_id = "胡桃/攻略", 9
+                html = (
+                    "<h2>角色定位</h2><p>主C。</p>"
+                    "<h2>圣遗物</h2><p>炽烈的炎之魔女四件套。</p>"
+                    "<h2>武器</h2><p>护摩之杖。</p>"
+                    "<h2>阵容搭配</h2><p>胡行钟夜。</p>"
+                )
+            else:
+                title, page_id = "胡桃", 1
+                html = (
+                    "<h2>属性数据</h2><p>生命值 15552</p>"
+                    "<h2>命之座</h2><p>1命 效果。</p>"
+                    "<h2>角色搭配推荐</h2><p>内容已移动到角色攻略。</p>"
+                )
+            return {
+                "_fetched_at": "2026-10-30",
+                "parse": {
+                    "title": title,
+                    "pageid": page_id,
+                    "revid": 1,
+                    "text": html,
+                },
+            }
+
+    async def test_equipment_question_reads_the_guide_subpage(self):
+        client = self.GuideClient()
+        result = await QueryService(client, profile=PROFILES["ys"]).search(
+            "胡桃", "胡桃圣遗物带什么"
+        )
+        assert result["title"] == "胡桃/攻略"
+        assert result["resolved_from"]
+        assert [e["section"] for e in result["evidence"]] == ["圣遗物"]
+
+    async def test_identity_question_stays_on_the_main_page(self):
+        client = self.GuideClient()
+        result = await QueryService(client, profile=PROFILES["ys"]).search(
+            "胡桃", "胡桃是谁"
+        )
+        assert result["title"] == "胡桃"
+        assert all(p.get("page") != "胡桃/攻略" for p in client.requests)
+
+    async def test_non_character_pages_never_try_the_guide(self):
+        class WeaponClient(self.GuideClient):
+            async def request(self, params, ttl):
+                self.requests.append(params)
+                if params["action"] == "query":
+                    return {"query": {"search": [{"title": "护摩之杖", "pageid": 2}]}}
+                return {
+                    "_fetched_at": "2026-10-30",
+                    "parse": {
+                        "title": "护摩之杖",
+                        "pageid": 2,
+                        "revid": 1,
+                        "text": "<h2>武器技能</h2><p>生命值提升。</p>",
+                    },
+                }
+
+        client = WeaponClient()
+        result = await QueryService(client, profile=PROFILES["ys"]).search(
+            "护摩之杖", "护摩之杖武器效果"
+        )
+        assert result["title"] == "护摩之杖"
+        assert all(p.get("page") != "护摩之杖/攻略" for p in client.requests)
+
+    async def test_missing_subpage_falls_back_to_the_main_page(self):
+        class MissingGuideClient(self.GuideClient):
+            async def request(self, params, ttl):
+                if params.get("page") == "胡桃/攻略":
+                    self.requests.append(params)
+                    return {"_fetched_at": "2026-10-30"}  # 无 parse → WikiError
+                return await super().request(params, ttl)
+
+        client = MissingGuideClient()
+        result = await QueryService(client, profile=PROFILES["ys"]).search(
+            "胡桃", "胡桃配队"
+        )
+        assert result["title"] == "胡桃"

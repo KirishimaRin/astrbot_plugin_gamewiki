@@ -200,7 +200,14 @@ def test_sr_generic_skill_words_reach_the_trace_section():
         Section("角色晋阶材料", "mat1", ["思绪末屑 ×5"]),
         Section("技能晋阶材料", "mat2", ["步离犬牙 ×3"]),
     ]
-    for question in ("流萤技能", "流萤战技", "流萤天赋", "流萤行迹", "流萤终结技"):
+    for question in (
+        "流萤技能",
+        "流萤战技",
+        "流萤天赋",
+        "流萤行迹",
+        "流萤终结技",
+        "流萤秘技",
+    ):
         snippets, _, selection = evidence(
             sections,
             question,
@@ -360,3 +367,402 @@ def test_bwiki_operator_css_grids_preserve_levels_and_skill_boundaries():
     skill = next(s for s in sections if s.title == "技能 / 技能3")
     assert "1 | 攻击变为3连射 | 20 | 50 | 15" in "\n".join(skill.blocks)
     assert "自动触发" in "\n".join(skill.blocks)
+
+
+def test_sr_eidolon_question_reaches_the_eidolon_table():
+    from wiki.selection import evidence
+
+    # 星魂数值本体是独立的「星魂」表；「天赋 / …效果加成 [星魂N]」只是
+    # 单魂加成详情，不得因问题带“效果”而压过本体。
+    sections = [
+        Section("概览", "intro", ["角色概览。"]),
+        Section("行迹", "trace", ["战技倍率 120%。"]),
+        Section(
+            "星魂", "eidolon", ["名称 | 效果\n我曾安眠，赤染之茧 | 无视目标15%的防御"]
+        ),
+        Section(
+            "天赋 / 元素战技 / 自破碎的天空坠落 效果加成 [星魂2]",
+            "eidolon2",
+            ["施放强化战技时无视目标15%的防御。"],
+        ),
+    ]
+    for question in ("流萤星魂", "流萤星魂效果"):
+        snippets, _, selection = evidence(
+            sections,
+            question,
+            3000,
+            "",
+            "流萤",
+            PROFILES["sr"].intents,
+            PROFILES["sr"].specifics,
+        )
+        assert [item["section"] for item in snippets] == ["星魂"], question
+        assert selection["mode"] != "fallback", question
+
+
+def test_ys_constellation_question_reaches_the_constellation_section():
+    from wiki.selection import evidence
+
+    sections = [
+        Section("概览", "intro", ["角色概览。"]),
+        Section("命之座", "constellation", ["1命 | 效果描述"]),
+        Section("天赋 / 元素战技", "skill", ["战技伤害。"]),
+    ]
+    for question in ("纳西妲命之座", "纳西妲命座", "纳西妲命之座效果"):
+        snippets, _, selection = evidence(
+            sections,
+            question,
+            3000,
+            "",
+            "纳西妲",
+            PROFILES["ys"].intents,
+            PROFILES["ys"].specifics,
+        )
+        assert [item["section"] for item in snippets] == ["命之座"], question
+        assert selection["mode"] != "fallback", question
+
+
+def test_zzz_cinema_and_core_passive_questions_route_to_their_sections():
+    from wiki.selection import evidence
+
+    sections = [
+        Section("概览", "intro", ["角色概览。"]),
+        Section("意象影画", "cinema", ["1画 | 效果描述"]),
+        Section("天赋 / 固有天赋 / 核心被动：凌牙厉齿", "passive", ["被动效果描述。"]),
+        Section("技能", "skill", ["特殊技描述。"]),
+    ]
+    for question, expected in (
+        ("艾莲影画", "意象影画"),
+        ("艾莲影画效果", "意象影画"),
+        ("艾莲核心被动", "天赋 / 固有天赋 / 核心被动：凌牙厉齿"),
+        ("艾莲核心被动效果", "天赋 / 固有天赋 / 核心被动：凌牙厉齿"),
+    ):
+        snippets, _, selection = evidence(
+            sections,
+            question,
+            3000,
+            "",
+            "艾莲",
+            PROFILES["zzz"].intents,
+            PROFILES["zzz"].specifics,
+        )
+        assert [item["section"] for item in snippets] == [expected], question
+        assert selection["mode"] != "fallback", question
+
+
+def test_ark_base_skill_question_reaches_both_source_sections():
+    from wiki.selection import evidence
+
+    # PRTS 叫「后勤技能」、BWIKI 叫「基建技能」，同一个问题两源都要命中。
+    prts = [
+        Section("技能", "skill", ["技能导航。"]),
+        Section("技能 / 技能1", "skill1", ["等级 | 描述\n1 | 3连射"]),
+        Section("技能 / 技能2", "skill2", ["等级 | 描述\n1 | 4连射"]),
+        Section("技能 / 技能3", "skill3", ["等级 | 描述\n1 | 5连射"]),
+        Section(
+            "后勤技能",
+            "base",
+            ["条件 | 房间 | 描述\n精英0 | 贸易站 | 订单获取效率 +20%"],
+        ),
+    ]
+    bwiki = prts[:-1] + [
+        Section(
+            "基建技能",
+            "base",
+            ["条件 | 房间 | 描述\n精英0 | 贸易站 | 订单获取效率 +20%"],
+        )
+    ]
+    for sections, expected in ((prts, "后勤技能"), (bwiki, "基建技能")):
+        for question in ("能天使基建技能", "能天使后勤技能", "能天使基建"):
+            snippets, _, selection = evidence(
+                sections,
+                question,
+                3000,
+                "",
+                "能天使",
+                PROFILES["arknights"].intents,
+                PROFILES["arknights"].specifics,
+            )
+            assert [item["section"] for item in snippets] == [expected], question
+            assert selection["mode"] != "fallback", question
+
+
+def test_pool_redirect_pages_cover_four_games():
+    assert PROFILES["ys"].pool_pages[0][1] == "祈愿"
+    assert "卡池" in PROFILES["ys"].pool_pages[0][0]
+    assert PROFILES["sr"].pool_pages[0][1] == "跃迁"
+    assert PROFILES["zzz"].pool_pages[0][1] == "调频"
+    # 方舟双映射：保底先命中「寻访规则」，其余寻访类走「卡池一览」。
+    assert PROFILES["arknights"].pool_pages[0] == (("保底",), "寻访规则")
+    assert PROFILES["arknights"].pool_pages[1][1] == "卡池一览"
+    # 终末地各站没有卡池聚合页。
+    assert not PROFILES["zmd"].pool_pages
+
+
+def test_pool_questions_route_to_their_pool_sections():
+    from wiki.selection import evidence
+
+    # 「祈愿」聚合页分节：机制分节不在 pool intents 行里，机制类问题
+    # 靠自然评分命中；列表型问题按标题段子集路由，历史兜底承接复刻。
+    sections = [
+        Section("概览", "intro", ["祈愿介绍。"]),
+        Section("简介 / 祈愿机制 / 保底机制", "mech", ["卡池90抽必出五星。"]),
+        Section("祈愿池一览 / 活动祈愿（当前）", "current", ["本期UP：玛薇卡。"]),
+        Section("祈愿池一览 / 常驻祈愿", "standard", ["常驻祈愿池。"]),
+        Section("历史活动祈愿一览", "history", ["纳西妲复刻记录。"]),
+    ]
+    for question, first in (
+        ("当前卡池有什么", "祈愿池一览 / 活动祈愿（当前）"),
+        ("纳西妲复刻了吗", "历史活动祈愿一览"),
+        ("卡池保底是多少", "简介 / 祈愿机制 / 保底机制"),
+    ):
+        snippets, _, selection = evidence(
+            sections,
+            question,
+            3000,
+            "",
+            "祈愿",
+            PROFILES["ys"].intents,
+            PROFILES["ys"].specifics,
+        )
+        assert snippets, question
+        assert snippets[0]["section"] == first, question
+        assert selection["mode"] != "fallback", question
+
+
+def test_ark_pool_questions_reach_the_pool_hub_table():
+    from wiki.selection import evidence
+
+    # PRTS「卡池一览」分节：列表型寻访问题落进限时寻访表（新池子在前，
+    # 由提示词里的 now 按日期范围匹配当前池）。
+    sections = [
+        Section("概览", "intro", ["卡池一览介绍。"]),
+        Section(
+            "限时寻访", "limited", ["海渊巡游 | 2026-10-09 12:00~ 2026-10-23 03:59"]
+        ),
+        Section("常驻标准寻访", "standard", ["常驻池构成。"]),
+        Section("常驻中坚寻访&中坚甄选", "mid", ["中坚池构成。"]),
+        Section("新人特惠寻访", "newbie", ["新人池构成。"]),
+    ]
+    for question in ("当前卡池有什么", "当前寻访有什么", "卡池UP是谁"):
+        snippets, _, selection = evidence(
+            sections,
+            question,
+            3000,
+            "",
+            "卡池一览",
+            PROFILES["arknights"].intents,
+            PROFILES["arknights"].specifics,
+        )
+        assert snippets, question
+        assert snippets[0]["section"] == "限时寻访", question
+        assert selection["mode"] != "fallback", question
+
+
+def test_modifier_slang_keeps_prefix_entities_searchable():
+    """前缀位置的修饰语不替换，实体保持可检索。"""
+    from wiki.assistant import fallback_intent
+    from wiki.games import game_words, normalize_slang
+
+    # 满命/一命/六命 直接跟实体名时替换会把修饰语焊进实体（“命之座魈”）。
+    cases = (
+        ("满命魈强度怎么样", "ys", "命之座魈"),
+        ("一命那维莱特面板", "ys", "命之座那维莱特"),
+        ("六命钟离配装", "ys", "命之座钟离"),
+        ("1魂流萤", "sr", "星魂流萤"),
+        ("2画艾莲", "zzz", "意象影画艾莲"),
+        ("专三能天使", "arknights", "专精能天使"),
+        ("精二陈", "arknights", "精英化陈"),
+    )
+    for raw, code, fused in cases:
+        text = normalize_slang(raw, PROFILES[code])
+        assert text == raw and fused not in text, raw
+    # 保护之后问题仍按实体切分：方面词（强度/面板/配装）承接拆分。
+    assert fallback_intent("满命魈强度怎么样", (), game_words("ys"))[0] == "满命魈"
+    assert (
+        fallback_intent("一命那维莱特面板", (), game_words("ys"))[0] == "一命那维莱特"
+    )
+    assert fallback_intent("六命钟离配装", (), game_words("ys"))[0] == "六命钟离"
+
+
+def test_modifier_slang_still_rewrites_suffix_positions():
+    """后缀位置（实体名之后）的修饰语照常归一，不因保护而漏改。"""
+    from wiki.games import normalize_slang
+
+    cases = (
+        ("纳西妲一命效果", "纳西妲命之座效果", "ys"),
+        ("流萤二魂效果", "流萤星魂效果", "sr"),
+        ("钟离满命配装", "钟离命之座配装", "ys"),
+        ("纳西妲满命了吗", "纳西妲命之座了吗", "ys"),
+        ("满命需要多少材料", "命之座需要多少材料", "ys"),
+        ("流萤满魂伤害", "流萤星魂伤害", "sr"),
+        ("艾莲2画", "艾莲意象影画", "zzz"),
+        ("能天使专三材料", "能天使专精材料", "arknights"),
+        # 比较连接词也是安全后缀：两侧归一成同一词后退回通用提示。
+        ("精一和精二哪个好", "精英化和精英化哪个好", "arknights"),
+    )
+    for raw, expected, code in cases:
+        assert normalize_slang(raw, PROFILES[code]) == expected, raw
+
+
+def test_time_slang_adds_today_and_this_round():
+    from wiki.games import normalize_slang
+
+    for raw in ("现在卡池有什么", "今天卡池有什么", "这期卡池有什么", "本期卡池有什么"):
+        assert normalize_slang(raw, PROFILES["ys"]) == "当前卡池有什么", raw
+    assert normalize_slang("最新up池有什么", PROFILES["sr"]) == "当前up池有什么"
+
+
+def test_pool_words_cover_lowercase_up():
+    # “UP池”的大小写变体也要触发池子重定向与池 intents 行。
+    for code in ("ys", "sr", "zzz"):
+        words = [w for entry in PROFILES[code].pool_pages for w in entry[0]]
+        assert "up池" in words, code
+    for code in ("ys", "sr", "zzz", "arknights"):
+        triggers = [t for row in PROFILES[code].intents for t in row[0]]
+        assert "up" in triggers, code
+
+
+def test_constellation_and_potential_shorthand_normalizes():
+    """0命/几命/满潜 等玩家简写与一~六命同一套归一。"""
+    from wiki.games import normalize_slang
+
+    cases = (
+        ("胡桃0命能用吗", "胡桃命之座能用吗", "ys"),
+        ("胡桃几命", "胡桃命之座", "ys"),
+        ("流萤0魂能用吗", "流萤星魂能用吗", "sr"),
+        ("流萤几魂", "流萤星魂", "sr"),
+        ("安比几画", "安比意象影画", "zzz"),
+        ("安比满画", "安比意象影画", "zzz"),
+        ("能天使满潜", "能天使潜能", "arknights"),
+        ("能天使几潜", "能天使潜能", "arknights"),
+    )
+    for raw, expected, code in cases:
+        assert normalize_slang(raw, PROFILES[code]) == expected, raw
+    # 前缀位置仍保护实体（“0命胡桃”不是“命之座胡桃”）。
+    assert normalize_slang("0命胡桃", PROFILES["ys"]) == "0命胡桃"
+    assert normalize_slang("满潜银灰", PROFILES["arknights"]) == "满潜银灰"
+
+
+def test_equipment_slang_maps_to_each_game_weapon_term():
+    from wiki.games import normalize_slang
+
+    for code, term in (("ys", "武器"), ("sr", "光锥"), ("zzz", "音擎")):
+        assert normalize_slang("纳西妲专武是什么", PROFILES[code]) == (
+            f"纳西妲{term}是什么"
+        ), code
+    # 满精=精炼五档；交给 selection.project_refine 取档。
+    assert normalize_slang("护摩满精效果", PROFILES["ys"]) == "护摩精炼5效果"
+
+
+def test_pool_words_cover_bare_up_and_pool_phrasings():
+    """裸 up、池子、武器池、混池、定轨 等高频问法也要重定向。"""
+    for code in ("ys", "sr", "zzz", "arknights"):
+        words = [w for entry in PROFILES[code].pool_pages for w in entry[0]]
+        for word in ("up", "UP", "池子"):
+            assert word in words, (code, word)
+    ys_words = [w for entry in PROFILES["ys"].pool_pages for w in entry[0]]
+    for word in ("武器池", "角色池", "混池", "定轨", "集录", "常驻"):
+        assert word in ys_words, word
+    assert "光锥池" in [w for e in PROFILES["sr"].pool_pages for w in e[0]]
+    assert "音擎池" in [w for e in PROFILES["zzz"].pool_pages for w in e[0]]
+
+
+def test_aspect_words_cover_equipment_and_basic_info():
+    from wiki.games import aspect_words
+
+    words = set(aspect_words())
+    for word in (
+        "圣遗物",
+        "遗器",
+        "驱动盘",
+        "光锥",
+        "音擎",
+        "邦布",
+        "专武",
+        "词条",
+        "副词条",
+        "生日",
+        "CV",
+        "声优",
+        "身高",
+        "年龄",
+    ):
+        assert word in words, word
+
+
+def test_constellation_plus_refine_shorthand():
+    """社区简写 N+M（命座+精炼）归一到命座分节，前缀位置仍保护实体。"""
+    from wiki.games import normalize_slang
+
+    cases = (
+        ("胡桃1+1够用吗", "胡桃命之座够用吗", "ys"),
+        ("胡桃6+5", "胡桃命之座", "ys"),
+        ("流萤0+1", "流萤星魂", "sr"),
+        ("艾莲2+1", "艾莲意象影画", "zzz"),
+    )
+    for raw, expected, code in cases:
+        assert normalize_slang(raw, PROFILES[code]) == expected, raw
+    assert normalize_slang("1+1胡桃", PROFILES["ys"]) == "1+1胡桃"
+    # 方舟没有命座简写，保持原样。
+    assert normalize_slang("能天使1+1", PROFILES["arknights"]) == "能天使1+1"
+
+
+def test_graduation_slang_is_dropped():
+    from wiki.games import normalize_slang
+
+    for raw, expected in (
+        ("胡桃毕业面板", "胡桃面板"),
+        ("胡桃毕业武器", "胡桃武器"),
+        ("纳西妲毕业圣遗物", "纳西妲圣遗物"),
+    ):
+        assert normalize_slang(raw, PROFILES["ys"]) == expected, raw
+
+
+def test_equipment_questions_route_to_real_guide_sections():
+    """按实测 BWIKI 分节标题验证配装类问题落到正确分节。"""
+    from wiki.selection import Section, evidence
+
+    def page(titles):
+        return [Section(t, t, [f"{t}内容。"]) for t in titles]
+
+    cases = (
+        (
+            "ys",
+            ["角色定位", "配装推荐", "圣遗物", "武器", "阵容搭配"],
+            [
+                ("胡桃圣遗物", "圣遗物"),
+                ("胡桃武器推荐", "武器"),
+                ("胡桃配队", "阵容搭配"),
+            ],
+        ),
+        (
+            "sr",
+            ["角色定位", "配装推荐", "遗器", "光锥", "阵容搭配"],
+            [("流萤遗器", "遗器"), ("流萤光锥推荐", "光锥"), ("流萤配队", "阵容搭配")],
+        ),
+        (
+            "zzz",
+            ["属性数据", "配装推荐", "驱动盘套装", "词条推荐", "音擎推荐", "阵容搭配"],
+            [
+                ("艾莲驱动盘", "驱动盘套装"),
+                ("艾莲音擎推荐", "音擎推荐"),
+                ("艾莲词条", "词条推荐"),
+                ("艾莲配队", "阵容搭配"),
+            ],
+        ),
+    )
+    for code, titles, questions in cases:
+        profile = PROFILES[code]
+        for question, expected in questions:
+            snippets, _, meta = evidence(
+                page(titles),
+                question,
+                3000,
+                "",
+                "角色",
+                profile.intents,
+                profile.specifics,
+            )
+            assert [s["section"] for s in snippets][:1] == [expected], question
+            assert meta["mode"] != "fallback", question

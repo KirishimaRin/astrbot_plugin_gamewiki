@@ -12,6 +12,11 @@ class SourceRouter:
         self.timeout = timeout
         self.fallbacks = 0
 
+    @property
+    def profile(self):
+        # Both sources serve the same game; question normalization uses it.
+        return self.primary.profile
+
     @staticmethod
     def _annotate(result, source):
         result = {**result, "source_key": source}

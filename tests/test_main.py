@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from wiki.games import PROFILES
 from wiki.limits import Limiter
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -477,8 +478,13 @@ def test_ark_candidates_and_followups_keep_their_source(plugin, source):
 
 def test_ark_tool_reads_require_explicit_source(plugin):
     instance, Event, module = plugin
-    primary = SimpleNamespace(aliases={}, read=AsyncMock(return_value=_wiki_page()))
-    backup = SimpleNamespace(aliases={}, read=AsyncMock(return_value=_wiki_page()))
+    profile = PROFILES["arknights"]
+    primary = SimpleNamespace(
+        aliases={}, profile=profile, read=AsyncMock(return_value=_wiki_page())
+    )
+    backup = SimpleNamespace(
+        aliases={}, profile=profile, read=AsyncMock(return_value=_wiki_page())
+    )
     instance.services["arknights"] = module.ArknightsSources(primary, backup)
 
     async def check():
@@ -854,3 +860,119 @@ def test_doctor_reports_the_plugin_directory_font(plugin):
     assert str(directory) in text
     assert str(font) in text
     assert "DejaVu Sans" in text
+
+
+def test_tool_search_normalizes_question_slang(plugin):
+    # AI 工具路径与命令路径同一套黑话归一，README 的自然语言示例
+    # （"纳西妲平A倍率"）在工具路径同样命中原神普攻分节。
+    instance, Event, _ = plugin
+    captured = {}
+
+    async def fake_search(query, question=""):
+        captured["question"] = question
+        return {"status": "ok"}
+
+    instance.services["ys"].search = fake_search
+    result = asyncio.run(
+        instance._tool_search(Event(), "纳西妲", "纳西妲平A倍率", "ys")
+    )
+    assert result["status"] == "ok"
+    assert captured["question"] == "纳西妲普攻倍率"
+
+
+def test_tool_read_normalizes_question_slang(plugin):
+    instance, Event, module = plugin
+    captured = {}
+
+    async def fake_read(page_id, question, section):
+        captured["question"] = question
+        return {"status": "ok"}
+
+    instance.services["ys"].read = fake_read
+    result = asyncio.run(instance._tool_read(Event(), 42, "", "满命效果", "ys"))
+    assert result["status"] == "ok"
+    assert captured["question"] == "命之座效果"
+
+    # 双源游戏走 SourceRouter，profile 取自主源服务。
+    async def router_read(page_id, question, section, source=""):
+        captured["question"] = question
+        return {"status": "ok", "source_key": source}
+
+    ark_profile = PROFILES["arknights"]
+    instance.services["arknights"] = module.ArknightsSources(
+        SimpleNamespace(aliases={}, profile=ark_profile, read=router_read),
+        SimpleNamespace(aliases={}, profile=ark_profile, read=router_read),
+    )
+    result = asyncio.run(
+        instance._tool_read(Event(), 42, "", "专三材料", "arknights", "prts")
+    )
+    assert result["source_key"] == "prts"
+    assert captured["question"] == "专精材料"
+
+
+def test_schema_declares_model_provider_default(plugin):
+    schema = json.loads((ROOT / "_conf_schema.json").read_text(encoding="utf-8"))
+    assert schema["model_provider"]["type"] == "string"
+    assert schema["model_provider"]["default"] == ""
+    # WebUI 用官方提供商选择器渲染下拉框；留空=跟随会话模型。
+    assert schema["model_provider"]["_special"] == "select_provider"
+
+
+def test_configured_model_overrides_the_session_model(plugin):
+    instance, Event, _ = plugin
+    configured = type(instance)(
+        object(),
+        {"games": ["ys"], "user_cooldown_seconds": 0, "model_provider": "my-model"},
+    )
+    try:
+        configured.services["ys"].search = AsyncMock(return_value=_wiki_page())
+        session = AsyncMock(return_value="session-model")
+        llm = AsyncMock(return_value=SimpleNamespace(completion_text="需要劫波莲。"))
+        configured.context = SimpleNamespace(
+            get_current_chat_provider_id=session, llm_generate=llm
+        )
+        asyncio.run(_collect(configured.wiki_command_ys(Event("ys 纳西妲 突破"))))
+        assert llm.await_args.kwargs["chat_provider_id"] == "my-model"
+        session.assert_not_awaited()
+    finally:
+        asyncio.run(configured.terminate())
+
+
+def test_configured_model_falls_back_to_the_session_model(plugin):
+    instance, Event, _ = plugin
+    configured = type(instance)(
+        object(),
+        {"games": ["ys"], "user_cooldown_seconds": 0, "model_provider": "my-model"},
+    )
+    try:
+        configured.services["ys"].search = AsyncMock(return_value=_wiki_page())
+        session = AsyncMock(return_value="session-model")
+        llm = AsyncMock(
+            side_effect=[
+                RuntimeError("unknown provider"),
+                SimpleNamespace(completion_text="需要劫波莲。"),
+            ]
+        )
+        configured.context = SimpleNamespace(
+            get_current_chat_provider_id=session, llm_generate=llm
+        )
+        asyncio.run(_collect(configured.wiki_command_ys(Event("ys 纳西妲 突破"))))
+        assert [call.kwargs["chat_provider_id"] for call in llm.await_args_list] == [
+            "my-model",
+            "session-model",
+        ]
+        assert configured.model_fallback_hits == 1
+    finally:
+        asyncio.run(configured.terminate())
+
+
+def test_doctor_reports_the_configured_model(plugin):
+    instance, Event, _ = plugin
+    instance.model_provider = "my-model"
+    instance.model_fallback_hits = 2
+    instance.context = SimpleNamespace(
+        get_current_chat_provider_id=AsyncMock(return_value="session-model")
+    )
+    text = asyncio.run(instance._doctor_text(Event()))
+    assert "插件模型：固定使用 my-model" in text
+    assert "已回退会话模型 2 次" in text

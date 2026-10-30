@@ -16,7 +16,7 @@ from .wiki.assistant import CommandAssistant
 from .wiki.card import clear_font_cache, font_description, render_card
 from .wiki.client import WikiClient
 from .wiki.conversation import NUMBER, Conversations, is_followup, looks_like_followup
-from .wiki.games import PROFILES, GameProfile, parse_alias_config
+from .wiki.games import PROFILES, GameProfile, normalize_slang, parse_alias_config
 from .wiki.images import prepared_image
 from .wiki.limits import Limiter
 from .wiki.models import WikiError
@@ -56,6 +56,9 @@ class GameWiki(Star):
         self.brief_chars = int(number("reply_brief_chars", 350, 200, 1500))
         self.detailed_chars = int(number("reply_question_chars", 750, 300, 2000))
         self.model_timeout = number("model_timeout_seconds", 20, 2, 60)
+        # 空串=跟随会话当前模型；否则固定使用该服务提供商。
+        self.model_provider = str(config.get("model_provider", "") or "").strip()
+        self.model_fallback_hits = 0
         self.overview_chars = int(number("overview_chars", 250, 150, 500))
         data_root = Path(get_astrbot_data_path()) / "plugin_data"
         directory = data_root / "astrbot_plugin_gamewiki"
@@ -260,6 +263,13 @@ class GameWiki(Star):
             f"目录写入：{'正常' if health['writable'] else '失败'}",
             f"有效缓存：{health['entries']} 条 / {health['bytes']} 字节",
         ]
+        lines.append(
+            f"插件模型：固定使用 {self.model_provider}（不可用时回退会话模型）"
+            if self.model_provider
+            else "插件模型：跟随会话当前模型"
+        )
+        if self.model_fallback_hits:
+            lines.append(f"模型回退：已回退会话模型 {self.model_fallback_hits} 次")
         try:
             provider = await asyncio.wait_for(
                 self.context.get_current_chat_provider_id(umo=event.unified_msg_origin),
@@ -440,19 +450,40 @@ class GameWiki(Star):
                 result["command"] = profile.command
                 self.conversations.remember(key, ticket, profile.code, result)
 
-        provider_id = None
+        session_provider = None
 
-        async def generate(prompt):
-            nonlocal provider_id
-            if provider_id is None:
-                provider_id = await self.context.get_current_chat_provider_id(
+        async def session_model():
+            nonlocal session_provider
+            if session_provider is None:
+                session_provider = await self.context.get_current_chat_provider_id(
                     umo=event.unified_msg_origin
                 )
+            return session_provider
+
+        async def generate(prompt):
+            # 配置了模型就固定用它；留空跟随会话当前模型。配置的模型
+            # 不可用时回退会话模型一次，仍失败则由调用方降级原文摘录。
+            provider_id = self.model_provider or await session_model()
             if not provider_id:
                 raise RuntimeError("当前会话未配置聊天模型")
-            response = await self.context.llm_generate(
-                chat_provider_id=provider_id, prompt=prompt
-            )
+            try:
+                response = await self.context.llm_generate(
+                    chat_provider_id=provider_id, prompt=prompt
+                )
+            except Exception:
+                fallback = await session_model()
+                if not self.model_provider or not fallback or fallback == provider_id:
+                    raise
+                self.model_fallback_hits += 1
+                if self.debug_log:
+                    logger.warning(
+                        "配置的模型 %s 调用失败，回退会话模型 %s",
+                        provider_id,
+                        fallback,
+                    )
+                response = await self.context.llm_generate(
+                    chat_provider_id=fallback, prompt=prompt
+                )
             return response.completion_text
 
         assistant = CommandAssistant(
@@ -621,6 +652,9 @@ class GameWiki(Star):
             self._limited(event)
         except WikiError as exc:
             return {"status": "error", "code": exc.code, "message": str(exc)}
+        # 与命令路径同一套黑话归一：模型回填的 question 可能带着用户的
+        # 平A、满命、现在等原话，不归一就命不中方面词与「（当前）」分节。
+        question = normalize_slang(question, service.profile)
         return await self._run(service.search, query, question)
 
     async def _tool_read(self, event, page_id, section, question, game, source=""):
@@ -645,6 +679,7 @@ class GameWiki(Star):
         # JSON Schema's number type may arrive as an integral float.
         if isinstance(page_id, float) and page_id.is_integer():
             page_id = int(page_id)
+        question = normalize_slang(question, service.profile)
         if game in {"arknights", "zmd"} or source:
 
             async def read_from_source():
