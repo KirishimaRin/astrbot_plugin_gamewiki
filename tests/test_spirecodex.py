@@ -27,10 +27,18 @@ CARD_NAMES = {
     "necrobinder": "亡灵契约师",
     "defect": "故障机器人",
 }
+RARITY_KEYS = {
+    "基础": "Basic",
+    "普通": "Common",
+    "罕见": "Uncommon",
+    "稀有": "Rare",
+    "先古": "Ancient",
+}
+TYPE_KEYS = {"攻击": "Attack", "技能": "Skill", "能力": "Power"}
 
 
 def card(key, name, color, **extra):
-    return {
+    entity = {
         "id": key,
         "name": name,
         "description": "造成6点伤害。",
@@ -53,12 +61,16 @@ def card(key, name, color, **extra):
         "image_url_card": f"https://cdn.spire-codex.com/cards-full/stable/{key.lower()}.webp",
         **extra,
     }
+    entity["rarity_key"] = RARITY_KEYS.get(entity["rarity"], entity["rarity"])
+    entity["type_key"] = TYPE_KEYS.get(entity["type"], entity["type"])
+    return entity
 
 
 CARDS = [card(f"STRIKE_{color.upper()}", "打击", color) for color in COLORS] + [
     card("DEFEND_IRONCLAD", "防御", "ironclad", block=5, damage=None),
     card("BASH", "重击", "ironclad", damage=8),
     card("INFLAME", "燃烧", "ironclad", damage=None, description="获得2点力量。"),
+    card("BLUDGEON", "重砍", "ironclad", rarity="稀有", cost=3, damage=32),
 ]
 RELICS = [
     {
@@ -80,6 +92,15 @@ RELICS = [
         "pool": "ironclad",
         "merchant_price": 150,
         "image_url": "/static/images/relics/red_skull.webp",
+    },
+    {
+        "id": "RING_OF_SNAKES",
+        "name": "蛇之环",
+        "description": "每回合开始时，获得1点格挡。",
+        "rarity": "初始遗物",
+        "pool": "silent",
+        "merchant_price": None,
+        "image_url": "/static/images/relics/ring_of_snakes.webp",
     },
 ]
 CHARACTERS = [
@@ -121,6 +142,29 @@ GLOSSARY = [
         "category": "combat",
     }
 ]
+AFFLICTIONS = [
+    {
+        "id": "ASCENDERS_BANE",
+        "name": "进阶之灾",
+        "description": "不可移除的诅咒。",
+        "category": "curse",
+    },
+    {
+        "id": "DOUBT",
+        "name": "疑虑",
+        "description": "无法打出，回合结束时受到伤害。",
+        "category": "curse",
+    },
+]
+KEYWORDS = [{"id": "EXHAUST", "name": "消耗", "description": "本场战斗中不再出现。"}]
+ENCHANTMENTS = [
+    {
+        "id": "SHARP",
+        "name": "锋利",
+        "description": "攻击牌额外造成1点伤害。",
+        "card_type": "Attack",
+    }
+]
 ORBS = [
     {
         "id": "DARK_ORB",
@@ -154,6 +198,30 @@ MECHANICS = [
         "body_markdown": "## Attack\n\n**Strength** adds damage.\n\n| Effect | Per stack |\n|---|---|\n| Strength | +1 |",
     }
 ]
+CARD_RARITY_MECHANIC = {
+    "slug": "card-rarity",
+    "title": "Card Rarity Odds",
+    "description": "Card reward rarity chances for each fight type.",
+    "category": "mechanics",
+    "order": 1,
+    "body_markdown": "## Normal Fights\n\nCommon 60%.\n\nBoss rewards are always rare.",
+}
+SCORE_MECHANIC = {
+    "slug": "score-formula",
+    "title": "Scoring & Daily Leaderboards",
+    "description": "How run score is calculated, plus the daily leaderboard.",
+    "category": "mechanics",
+    "order": 16,
+    "body_markdown": "## Run Score\n\n10 pts per room, act multipliers apply.\n\n## Daily\n\nDaily runs rank on a leaderboard.",
+}
+UNKNOWN_ROOMS_MECHANIC = {
+    "slug": "unknown-rooms",
+    "title": "Unknown Room Probabilities",
+    "description": "What each ? room can contain.",
+    "category": "mechanics",
+    "order": 7,
+    "body_markdown": "## Unknown Rooms\n\nShop 22%, treasure 22%, rest 22%.",
+}
 ASCENSIONS = [
     {
         "id": "LEVEL_10",
@@ -223,7 +291,63 @@ ENCOUNTERS = [
     },
 ]
 MONSTERS = [
-    {"id": "WRIGGLER", "name": "扭动虫", "type": "Elite", "min_hp": 10, "max_hp": 12}
+    {
+        "id": "WRIGGLER",
+        "name": "扭动虫",
+        "type": "Elite",
+        "min_hp": 10,
+        "max_hp": 12,
+        "min_hp_ascension": 11,
+        "max_hp_ascension": 13,
+        "innate_powers": [],
+        "moves": [
+            {
+                "id": "BITE",
+                "name": "撕咬",
+                "intent": "Attack",
+                "damage": {"normal": 7, "ascension": 8, "hit_count": None},
+                "block": None,
+                "heal": None,
+                "powers": None,
+            }
+        ],
+        "attack_pattern": {"type": "sequential", "initial_move": "BITE", "states": []},
+    },
+    {
+        "id": "KNOWLEDGE_DEMON",
+        "name": "知识恶魔",
+        "type": "Boss",
+        "min_hp": 160,
+        "max_hp": 160,
+        "min_hp_ascension": 168,
+        "max_hp_ascension": 168,
+        "innate_powers": [{"power": "力量", "amount": 3}],
+        "moves": [
+            {
+                "id": "CURSE_OF_KNOWLEDGE",
+                "name": "知识的诅咒",
+                "intent": "Debuff",
+                "damage": None,
+                "block": None,
+                "heal": None,
+                "powers": None,
+            },
+            {
+                "id": "SLAP",
+                "name": "抽打",
+                "intent": "Attack",
+                "damage": {"normal": 17, "ascension": 18, "hit_count": 2},
+                "block": None,
+                "heal": None,
+                "powers": None,
+            },
+        ],
+        "attack_pattern": {
+            "type": "conditional",
+            "initial_move": "CURSE_OF_KNOWLEDGE",
+            "states": [],
+        },
+    },
 ]
 ANCIENT_POOLS = [
     {
@@ -320,6 +444,21 @@ SEARCH = {
                         "name": "Combat Mechanics",
                         "path": "/mechanics/combat-mechanics",
                         "subtitle": "mechanics",
+                    }
+                ],
+            }
+        ],
+    },
+    "附魔怎么选": {
+        "query": "附魔怎么选",
+        "categories": [
+            {
+                "kind": "relic",
+                "items": [
+                    {
+                        "name": "亮片",
+                        "path": "/relics/sequins",
+                        "subtitle": "先古遗物 · shared",
                     }
                 ],
             }
@@ -482,6 +621,51 @@ SEARCH = {
             }
         ],
     },
+    "诅咒": {
+        "query": "诅咒",
+        "categories": [
+            {
+                "kind": "affliction",
+                "items": [
+                    {
+                        "name": "进阶之灾",
+                        "path": "/afflictions/ascenders_bane",
+                        "subtitle": "Curse",
+                    },
+                    {
+                        "name": "疑虑",
+                        "path": "/afflictions/doubt",
+                        "subtitle": "Curse",
+                    },
+                ],
+            }
+        ],
+    },
+    "知识恶魔": {
+        "query": "知识恶魔",
+        "categories": [
+            {
+                "kind": "monster",
+                "items": [
+                    {
+                        "name": "知识恶魔",
+                        "path": "/monsters/knowledge_demon",
+                        "subtitle": "Boss",
+                    }
+                ],
+            },
+            {
+                "kind": "encounter",
+                "items": [
+                    {
+                        "name": "知识恶魔",
+                        "path": "/encounters/knowledge_demon_boss",
+                        "subtitle": "Boss",
+                    }
+                ],
+            },
+        ],
+    },
     "Bash": {
         "query": "Bash",
         "categories": [
@@ -523,7 +707,18 @@ def make_service(tmp_path, calls=None):
         if path == "/api/changelogs":
             return httpx.Response(200, json=[{"game_version": "1.3.1", "tag": "1.3.1"}])
         if path == "/api/cards":
-            return httpx.Response(200, json=CARDS)
+            items = CARDS
+            if params.get("color"):
+                items = [item for item in items if item.get("color") == params["color"]]
+            if params.get("rarity"):
+                items = [
+                    item for item in items if item.get("rarity_key") == params["rarity"]
+                ]
+            if params.get("type"):
+                items = [
+                    item for item in items if item.get("type_key") == params["type"]
+                ]
+            return httpx.Response(200, json=items)
         if path.startswith("/api/cards/"):
             key = path.rsplit("/", 1)[-1].upper()
             entity = next((item for item in CARDS if item["id"] == key), None)
@@ -532,7 +727,10 @@ def make_service(tmp_path, calls=None):
                 json=entity or {"detail": "Not Found"},
             )
         if path == "/api/relics":
-            return httpx.Response(200, json=RELICS)
+            items = RELICS
+            if params.get("pool"):
+                items = [item for item in items if item.get("pool") == params["pool"]]
+            return httpx.Response(200, json=items)
         if path.startswith("/api/relics/"):
             key = path.rsplit("/", 1)[-1].upper()
             entity = next((item for item in RELICS if item["id"] == key), None)
@@ -557,8 +755,12 @@ def make_service(tmp_path, calls=None):
             return httpx.Response(200, json=ORBS)
         if path == "/api/orbs/dark_orb":
             return httpx.Response(200, json=ORBS[0])
-        if path in {"/api/afflictions", "/api/keywords", "/api/enchantments"}:
-            return httpx.Response(200, json=[])
+        if path == "/api/afflictions":
+            return httpx.Response(200, json=AFFLICTIONS)
+        if path == "/api/keywords":
+            return httpx.Response(200, json=KEYWORDS)
+        if path == "/api/enchantments":
+            return httpx.Response(200, json=ENCHANTMENTS)
         if path == "/api/pairings/cards/inflame":
             return httpx.Response(
                 200,
@@ -591,7 +793,13 @@ def make_service(tmp_path, calls=None):
             )
         if path == "/api/runs/scores/cards":
             return httpx.Response(
-                200, json={"INFLAME": {"win_rate": 43.6, "picks": 100, "score": 80}}
+                200,
+                json={
+                    "INFLAME": {"win_rate": 43.6, "picks": 100, "score": 80},
+                    "STRIKE_SILENT": {"win_rate": 52.0, "picks": 900, "score": 60},
+                    "STRIKE_IRONCLAD": {"win_rate": 48.0, "picks": 800, "score": 55},
+                    "BLUDGEON": {"win_rate": 61.0, "picks": 300, "score": 90},
+                },
             )
         if path == "/api/runs/scores/relics":
             return httpx.Response(
@@ -723,6 +931,13 @@ def make_service(tmp_path, calls=None):
             return httpx.Response(200, json=UNLOCKS)
         if path == "/api/monsters":
             return httpx.Response(200, json=MONSTERS)
+        if path.startswith("/api/monsters/"):
+            key = path.rsplit("/", 1)[-1].upper()
+            entity = next((item for item in MONSTERS if item["id"] == key), None)
+            return httpx.Response(
+                200 if entity else 404,
+                json=entity or {"detail": "Not Found"},
+            )
         if path == "/api/encounters":
             return httpx.Response(200, json=ENCOUNTERS)
         if path == "/api/events":
@@ -737,6 +952,12 @@ def make_service(tmp_path, calls=None):
             return httpx.Response(200, json=MECHANICS)
         if path == "/api/mechanics/sections/combat-mechanics":
             return httpx.Response(200, json=MECHANICS[0])
+        if path == "/api/mechanics/sections/card-rarity":
+            return httpx.Response(200, json=CARD_RARITY_MECHANIC)
+        if path == "/api/mechanics/sections/score-formula":
+            return httpx.Response(200, json=SCORE_MECHANIC)
+        if path == "/api/mechanics/sections/unknown-rooms":
+            return httpx.Response(200, json=UNKNOWN_ROOMS_MECHANIC)
         return httpx.Response(404, json={"detail": "Not Found"})
 
     client = SpireCodexClient(
@@ -1385,3 +1606,405 @@ def test_relic_suitability_uses_community_sections(tmp_path):
     result = asyncio.run(run())
     assert result["status"] == "ok"
     assert "胜率" in result["available_sections"]
+
+
+def test_relic_pool_list_query(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            return await service.search("铁甲战士遗物池", "")
+        finally:
+            await client.close()
+
+    result = asyncio.run(run())
+    assert result["status"] == "ok"
+    assert result["url"] == f"{BASE}/zhs/relics"
+    assert "遗物列表" in result["available_sections"]
+    text = "\n".join(item["text"] for item in result["evidence"])
+    assert "燃烧之血" in text and "红头骨" in text
+    assert "蛇之环" not in text
+
+
+def test_relic_pool_list_scoped_by_character(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            return await service.search("静默猎手", "遗物池")
+        finally:
+            await client.close()
+
+    result = asyncio.run(run())
+    assert result["status"] == "ok"
+    assert result["title"] == "静默猎手遗物池"
+    text = "\n".join(item["text"] for item in result["evidence"])
+    assert "蛇之环" in text and "燃烧之血" not in text
+
+
+def test_card_filter_list_query(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            return await service.search("铁甲战士所有稀有攻击牌", "")
+        finally:
+            await client.close()
+
+    result = asyncio.run(run())
+    assert result["status"] == "ok"
+    assert "卡牌列表" in result["available_sections"]
+    text = "\n".join(item["text"] for item in result["evidence"])
+    assert "重砍" in text
+    assert "防御" not in text and "打击" not in text
+
+
+def test_ranked_card_list_query(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            return await service.search("静默猎手卡牌胜率", "")
+        finally:
+            await client.close()
+
+    result = asyncio.run(run())
+    assert result["status"] == "ok"
+    assert result["title"] == "静默猎手卡牌胜率排行"
+    assert "胜率排行" in result["available_sections"]
+    text = "\n".join(item["text"] for item in result["evidence"])
+    assert "打击：胜率 52%" in text
+    assert "社区统计，仅供参考" in text
+
+
+def test_generic_tier_query_ranks_cards_with_character_tags(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            return await service.search("当前版本Tier", "")
+        finally:
+            await client.close()
+
+    result = asyncio.run(run())
+    assert result["status"] == "ok"
+    assert result["url"] == f"{BASE}/zhs/stats/cards"
+    assert "胜率排行" in result["available_sections"]
+    text = "\n".join(item["text"] for item in result["evidence"])
+    # 重砍 61% 排第一；五张“打击”必须带角色标签才能区分。
+    assert text.index("重砍") < text.index("打击（铁甲战士）")
+    assert "打击（静默猎手）" in text
+    assert "社区统计，仅供参考" in text
+
+
+def test_character_rank_list_query(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            return await service.search("角色胜率排行", "")
+        finally:
+            await client.close()
+
+    result = asyncio.run(run())
+    assert result["status"] == "ok"
+    assert result["url"] == f"{BASE}/zhs/stats"
+    text = "\n".join(item["text"] for item in result["evidence"])
+    assert "铁甲战士：胜率 27.3%" in text
+    assert "仅供参考" in text
+
+
+def test_list_page_id_resolves_after_restart(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            search = await service.search("铁甲战士遗物池", "")
+            page_id = search["page_id"]
+            service._known.clear()
+            return await service.read(page_id, "遗物列表")
+        finally:
+            await client.close()
+
+    result = asyncio.run(run())
+    assert result["status"] == "ok"
+    assert "遗物列表" in result["available_sections"]
+    assert "燃烧之血" in "\n".join(item["text"] for item in result["evidence"])
+
+
+def test_card_list_question_keeps_entity_flow(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            removed = await service.search("删什么牌", "")
+            deck = await service.search("铁甲战士", "初始卡组")
+            return removed, deck
+        finally:
+            await client.close()
+
+    removed, deck = asyncio.run(run())
+    assert "最常删除" in removed["available_sections"]
+    assert "初始卡组" in deck["available_sections"]
+
+
+def test_monster_tactics_question_prefers_monster(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            return await service.search("知识恶魔", "怎么打")
+        finally:
+            await client.close()
+
+    result = asyncio.run(run())
+    assert result["status"] == "ok"
+    assert "招式" in result["available_sections"]
+    assert "打法要点" in result["available_sections"]
+    text = "\n".join(item["text"] for item in result["evidence"])
+    assert "最高伤害招式：抽打（伤害 17×2，进阶 18）。" in text
+    assert "首回合使用：知识的诅咒。" in text
+    assert "开局带有：力量 3。" in text
+
+
+def test_act_boss_tactics_section(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            return await service.search("第一章", "Boss怎么应对")
+        finally:
+            await client.close()
+
+    result = asyncio.run(run())
+    assert result["status"] == "ok"
+    assert "BOSS应对" in result["available_sections"]
+    text = "\n".join(item["text"] for item in result["evidence"])
+    assert "扭动虫" in text and "撕咬" in text
+
+
+def test_card_acquisition_uses_mechanics(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            return await service.search("卡牌怎么获得", "")
+        finally:
+            await client.close()
+
+    result = asyncio.run(run())
+    assert result["status"] == "ok"
+    assert "正文" in result["available_sections"]
+    text = "\n".join(item["text"] for item in result["evidence"])
+    assert "60%" in text
+
+
+def test_ascension_unlock_rules(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            return await service.search("进阶怎么解锁", "")
+        finally:
+            await client.close()
+
+    result = asyncio.run(run())
+    assert result["status"] == "ok"
+    assert "解锁规则" in result["available_sections"]
+    text = "\n".join(item["text"] for item in result["evidence"])
+    assert "第三章" in text and "角色独立" in text
+    assert result["url"] == f"{BASE}/zhs/unlocks"
+
+
+def test_list_key_round_trip_and_intent_guards():
+    specs = [
+        {
+            "mode": "list",
+            "kind": "card",
+            "color": "ironclad",
+            "rarity": "Rare",
+            "type": "Attack",
+        },
+        {"mode": "list", "kind": "relic", "color": "silent", "rarity": "", "type": ""},
+        {"mode": "list", "kind": "potion", "color": "", "rarity": "", "type": ""},
+        {"mode": "list", "kind": "affliction", "color": "", "rarity": "", "type": ""},
+        {"mode": "list", "kind": "event", "color": "", "rarity": "", "type": ""},
+        {"mode": "rank", "kind": "card", "color": "", "rarity": "", "type": ""},
+        {"mode": "rank", "kind": "character", "color": "", "rarity": "", "type": ""},
+        {
+            "mode": "note",
+            "kind": "relic",
+            "color": "",
+            "rarity": "",
+            "type": "",
+            "topic": "boss",
+        },
+    ]
+    for spec in specs:
+        key = SpireCodexService._list_key(spec)
+        parsed = SpireCodexService._parse_list_key(key)
+        assert parsed == spec, key
+        assert key in SpireCodexService._list_keys()
+    assert SpireCodexService._list_intent("静默猎手卡牌胜率", "") == {
+        "mode": "rank",
+        "kind": "card",
+        "color": "silent",
+    }
+    # 这张牌胜率 / 删牌 / 卡组类问法不走列表。
+    assert SpireCodexService._list_intent("燃烧这张牌胜率多少", "") is None
+    assert SpireCodexService._list_intent("删什么牌", "") is None
+    assert SpireCodexService._list_intent("铁甲战士", "初始卡组") is None
+    assert SpireCodexService._list_intent("遗物", "怎么解锁") is None
+    assert SpireCodexService._list_intent("卡牌稀有度概率", "") is None
+    assert SpireCodexService._list_intent("静默猎手", "A10胜率") is None
+    # 裸“胜率排行”保留攻略路径；带限定词才走社区排行。
+    assert SpireCodexService._list_intent("胜率排行", "") is None
+    assert SpireCodexService._list_intent("卡牌胜率排行", "") == {
+        "mode": "rank",
+        "kind": "card",
+        "color": "",
+    }
+    assert SpireCodexService._list_intent("角色胜率排行", "") == {
+        "mode": "rank",
+        "kind": "character",
+        "color": "",
+    }
+
+
+def test_score_and_daily_questions_reach_mechanics(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            score = await service.search("分数怎么算", "")
+            daily = await service.search("每日挑战", "")
+            return score, daily
+        finally:
+            await client.close()
+
+    score, daily = asyncio.run(run())
+    assert score["status"] == "ok"
+    assert score["url"].endswith("/zhs/mechanics/score-formula")
+    assert "正文" in score["available_sections"]
+    assert daily["status"] == "ok"
+    assert daily["url"].endswith("/zhs/mechanics/score-formula")
+
+
+def test_unknown_room_question_reaches_mechanics(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            return await service.search("问号房有什么", "")
+        finally:
+            await client.close()
+
+    result = asyncio.run(run())
+    assert result["status"] == "ok"
+    assert result["url"].endswith("/zhs/mechanics/unknown-rooms")
+    assert "正文" in result["available_sections"]
+
+
+def test_reference_kind_list_queries(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            afflictions = await service.search("苦痛有哪些", "")
+            orbs = await service.search("充能球有哪些", "")
+            events = await service.search("事件有哪些", "")
+            return afflictions, orbs, events
+        finally:
+            await client.close()
+
+    afflictions, orbs, events = asyncio.run(run())
+    assert afflictions["status"] == "ok"
+    assert "苦痛列表" in afflictions["available_sections"]
+    text = "\n".join(item["text"] for item in afflictions["evidence"])
+    assert "进阶之灾" in text
+    assert orbs["status"] == "ok" and "充能球列表" in orbs["available_sections"]
+    assert "黑暗" in "\n".join(item["text"] for item in orbs["evidence"])
+    assert events["status"] == "ok" and "事件列表" in events["available_sections"]
+    assert "深渊浴场" in "\n".join(item["text"] for item in events["evidence"])
+    assert events["url"] == f"{BASE}/zhs/events"
+
+
+def test_definition_suffix_is_stripped(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            return await service.search("诅咒是什么", "")
+        finally:
+            await client.close()
+
+    result = asyncio.run(run())
+    # “诅咒是什么”剥后缀后等价于裸“诅咒”：给苦痛候选而不是 not_found。
+    assert result["status"] == "needs_choice"
+    titles = [item["title"] for item in result["candidates"]]
+    assert any("进阶之灾" in title or "疑虑" in title for title in titles)
+
+
+def test_boss_relic_note_instead_of_full_list(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            return await service.search("BOSS遗物有哪些", "")
+        finally:
+            await client.close()
+
+    result = asyncio.run(run())
+    assert result["status"] == "ok"
+    assert result["title"] == "遗物分类说明"
+    assert "稀有度分布" in result["available_sections"]
+    text = "\n".join(item["text"] for item in result["evidence"])
+    assert "不设 Boss 分类" in text
+    assert "初始遗物：2 个" in text
+
+
+class TipsChinese:
+    """中文源替身：附魔问题返回 STS2FRONT tips 攻略，其余为空。"""
+
+    async def guide(self, query, question="", character=""):
+        if "附魔" in query:
+            return {
+                "key": "cn:guide:sts2front:tips:enchantments",
+                "title": "附魔怎么选",
+                "text": "附魔是长期成长系统，优先强化核心牌。",
+                "url": "https://sts2front.com/zh-cn/tips/enchantments/",
+            }
+        return None
+
+    async def mechanics(self, text):
+        return None
+
+    async def read(self, key):
+        return {
+            "id": key,
+            "title": "附魔怎么选",
+            "content": "附魔是长期成长系统，优先强化核心牌。",
+            "url": "https://sts2front.com/zh-cn/tips/enchantments/",
+        }
+
+    @staticmethod
+    def url(key):
+        return "https://sts2front.com/zh-cn/tips/enchantments/"
+
+
+def test_enchant_question_prefers_chinese_guide_over_noise(tmp_path):
+    service, client, _ = make_service(tmp_path)
+    service.chinese = TipsChinese()
+
+    async def run():
+        try:
+            return await service.search("附魔怎么选", "")
+        finally:
+            await client.close()
+
+    result = asyncio.run(run())
+    assert result["status"] == "ok"
+    assert result["title"] == "附魔怎么选"
+    assert result["source"] == "杀戮尖塔2 STS2FRONT"
+    assert "正文" in result["available_sections"]
+    assert "核心牌" in "\n".join(item["text"] for item in result["evidence"])

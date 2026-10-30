@@ -49,6 +49,10 @@ PATHS = {
     "ancient": "ancient-pools",
     "merchant": "merchant/config",
     "community": "community",
+    # Synthetic kind for list/rank results; _detail rebuilds them from the
+    # encoded key, no /api/lists endpoint exists. Appended last so existing
+    # KIND_CODES (and persisted page_ids) stay stable.
+    "list": "lists",
 }
 
 # /api/search names the mechanics category "mechanics"; the adapter uses the
@@ -91,6 +95,13 @@ GUIDE_TERMS = (
     ("休息", "rest"),
     ("攻略", "guide"),
     ("指南", "guide"),
+    ("分数", "score"),
+    ("得分", "score"),
+    ("每日挑战", "daily"),
+    ("每日排行", "daily"),
+    ("每日爬塔", "daily"),
+    ("问号房", "unknown"),
+    ("未知房", "unknown"),
 )
 # Query-level concept words: when the query itself is a concept (not an
 # entity prefix), try Chinese editorial content before fuzzy entity candidates.
@@ -125,6 +136,16 @@ CONCEPT_WORDS = (
     "boss",
     "升级",
     "休息",
+    "分数",
+    "每日挑战",
+    "问号房",
+    "未知房",
+    "联机",
+    "多人",
+    "合作",
+    "附魔",
+    "诅咒",
+    "苦痛",
 )
 GUIDE_INTENT_WORDS = (
     "攻略",
@@ -176,6 +197,10 @@ CHINESE_GUIDE_WORDS = (
     "纪元",
     "篝火",
     "休息",
+    "附魔",
+    "联机",
+    "多人",
+    "合作",
 )
 
 # Types that /api/search often exposes only as a "reference" entry, or not
@@ -249,6 +274,9 @@ RARITY_NAMES = {
     "Uncommon": "罕见",
     "Rare": "稀有",
     "Shop": "商店",
+    "Basic": "基础",
+    "Starter": "初始遗物",
+    "Ancient": "先古",
 }
 COMMUNITY_TITLES = {
     "deaths": "致命遭遇",
@@ -297,6 +325,101 @@ GLOSSARY_CATEGORIES = {
 }
 CARD_TYPES = {"Attack": "攻击", "Skill": "技能", "Power": "能力"}
 PAIRING_TYPES = {"card": "cards", "relic": "relics"}
+# Chinese filter words -> API *_key values for /api/cards?color&rarity&type.
+CARD_RARITY_KEYS = {
+    "基础": "Basic",
+    "普通": "Common",
+    "罕见": "Uncommon",
+    "稀有": "Rare",
+    "先古": "Ancient",
+}
+CARD_TYPE_KEYS = {"攻击": "Attack", "技能": "Skill", "能力": "Power"}
+# Reference kinds answerable with a “XX有哪些” list; their list endpoints are
+# small and already indexed by _term_exact.
+REFERENCE_LIST_KINDS = ("affliction", "orb", "keyword", "enchantment", "event")
+LIST_KEY_BY_KIND = {
+    "affliction": "AFFLICTIONS",
+    "orb": "ORBS",
+    "keyword": "KEYWORDS",
+    "enchantment": "ENCHANTMENTS",
+    "event": "EVENTS",
+}
+LIST_LABELS = {
+    "card": "卡牌",
+    "relic": "遗物",
+    "potion": "药水",
+    "affliction": "苦痛",
+    "orb": "充能球",
+    "keyword": "关键词",
+    "enchantment": "附魔",
+    "event": "事件",
+}
+LIST_QUESTION_DEFAULTS = {
+    "card": "卡牌列表",
+    "relic": "遗物列表",
+    "potion": "药水列表",
+    "affliction": "苦痛列表",
+    "orb": "充能球列表",
+    "keyword": "关键词列表",
+    "enchantment": "附魔列表",
+    "event": "事件列表",
+}
+LIST_ALL_WORDS = ("所有", "全部", "有哪些", "哪些", "列表", "遗物池")
+RANK_WORDS = ("排行", "排名", "胜率", "梯度", "强度榜", "Tier", "tier")
+# Kind-scoped ranking (“静默猎手卡牌胜率”) accepts any rank word; the generic
+# form needs a tier-list topic word, so bare “胜率排行” stays on the guide path.
+RANK_GENERIC_WORDS = (
+    "排行",
+    "排名",
+    "榜",
+    "表",
+    "当前",
+    "最新",
+    "版本",
+    "中文",
+    "梯度",
+    "强度榜",
+    "Tier",
+    "tier",
+)
+RANK_TOPIC_WORDS = (
+    "榜",
+    "表",
+    "当前",
+    "最新",
+    "版本",
+    "中文",
+    "梯度",
+    "强度榜",
+    "Tier",
+    "tier",
+)
+DECK_WORDS = ("牌组", "卡组", "牌堆")
+LIST_NOTE = "数据来自 Spire Codex 社区对局统计，仅供参考。"
+LIST_LIMIT = 120
+RANK_LIMIT = 12
+ACQUISITION_MECHANICS = (
+    ("卡牌", "card-rarity"),
+    ("遗物", "relic-distribution"),
+    ("药水", "potion-drop-rates"),
+)
+ACQUISITION_WORDS = ("获得", "获取", "掉落", "哪里弄", "怎么弄")
+# System-level concept questions with a dedicated mechanics page; direct slug
+# routing beats English search candidates (“分数怎么算”→ score-formula).
+CONCEPT_MECHANICS = (
+    (("分数", "得分", "积分", "每日挑战", "每日排行", "每日爬塔"), "score-formula"),
+    (("问号房", "未知房"), "unknown-rooms"),
+    (("地图怎么生成", "地图生成规则"), "map-generation"),
+    (("篝火选项", "篝火规则"), "campfire-options"),
+)
+# Confirmed progression rules; Spire Codex carries per-level effects but no
+# unlock-rule page, so this summary is the adapter's own editorial text.
+ASCENSION_RULES = (
+    "任一角色通关第三章后，解锁该角色的下一级进阶。",
+    "进阶等级按角色独立计算，换角色需要重新解锁。",
+    "多人模式使用队伍成员中最低的进阶等级。",
+)
+MONSTER_TACTIC_WORDS = ("怎么打", "打法", "应对", "对策", "怎么对付", "打不过")
 COMMUNITY_WORDS = (
     "搭配",
     "配对",
@@ -760,6 +883,247 @@ class SpireCodexService:
                         items.append({**row, "category": category})
         return items
 
+    async def _ascension_unlock_entity(self):
+        try:
+            levels = await self._index("ascension", "zhs")
+        except WikiError:
+            levels = []
+        return {"id": "UNLOCK", "name": "进阶解锁规则", "levels": levels}
+
+    async def _list_sections(self, entity, add):
+        spec = entity.get("spec") or {}
+        kind = spec.get("kind", "")
+        if spec.get("mode") == "note":
+            if kind == "relic" and spec.get("topic") == "boss":
+                await self._relic_note_sections(add)
+            return
+        if spec.get("mode") == "rank":
+            if kind == "character":
+                await self._character_rank_sections(add)
+            else:
+                await self._rank_list_sections(kind, spec, add)
+            return
+        if kind == "card":
+            await self._card_list_sections(spec, add)
+        elif kind == "relic":
+            await self._relic_list_sections(spec, add)
+        elif kind == "potion":
+            await self._potion_list_sections(add)
+        elif kind in REFERENCE_LIST_KINDS:
+            await self._reference_list_sections(kind, add)
+
+    async def _reference_list_sections(self, kind, add):
+        """“苦痛有哪些/事件有哪些”：小型 reference 类的整表列表。"""
+        try:
+            data = await self._index(kind, "zhs")
+        except WikiError:
+            data = []
+        items = [
+            item
+            for item in data
+            if isinstance(item, dict) and clean(item.get("name", ""))
+        ]
+        label = LIST_LABELS.get(kind, kind)
+        lines = []
+        for item in items[:LIST_LIMIT]:
+            name = clean(item.get("name", ""))
+            desc = clean(item.get("description") or "")
+            lines.append(f"{name}：{desc[:60]}" if desc else name)
+        if lines:
+            add(f"{label}列表", lines)
+        add("基本信息", [f"共 {len(items)} 个{label}。", *lines[:3]])
+
+    async def _relic_note_sections(self, add):
+        """“BOSS遗物有哪些”：STS2 没有 Boss 遗物分类，给稀有度结构说明。"""
+        try:
+            data = await self._index("relic", "zhs")
+        except WikiError:
+            data = []
+        counts: dict[str, int] = {}
+        for item in data:
+            if isinstance(item, dict):
+                rarity = str(item.get("rarity") or "未知")
+                counts[rarity] = counts.get(rarity, 0) + 1
+        lines = [
+            f"{rarity}：{count} 个"
+            for rarity, count in sorted(counts.items(), key=lambda pair: -pair[1])
+        ]
+        add(
+            "基本信息",
+            [
+                "杀戮尖塔2 的遗物不设 Boss 分类，按稀有度划分，"
+                "初始遗物与商店遗物单列；掉落分布见机制页。",
+                *lines,
+            ],
+        )
+        add("稀有度分布", lines)
+
+    @staticmethod
+    def _list_items(data):
+        if not isinstance(data, list):
+            return []
+        return [item for item in data if isinstance(item, dict)]
+
+    async def _card_list_sections(self, spec, add):
+        params = {"lang": "zhs"}
+        if spec.get("color"):
+            params["color"] = spec["color"]
+        if spec.get("rarity"):
+            params["rarity"] = spec["rarity"]
+        if spec.get("type"):
+            params["type"] = spec["type"]
+        data = await self.client.get("/api/cards", params, self.page_ttl)
+        items = self._list_items(data)
+        info = [f"共 {len(items)} 张卡牌。"]
+        if spec.get("color"):
+            info.append(f"角色：{CHARACTERS.get(spec['color'], spec['color'])}")
+        if spec.get("rarity"):
+            info.append(f"稀有度：{RARITY_NAMES.get(spec['rarity'], spec['rarity'])}")
+        if spec.get("type"):
+            info.append(f"类型：{CARD_TYPES.get(spec['type'], spec['type'])}")
+        # 跨角色列表会同时出现五张“打击”：每行都带角色标签，避免无法区分。
+        multi = len({str(item.get("color", "")) for item in items}) > 1
+        lines, shown = [], 0
+        for item in items:
+            if shown >= LIST_LIMIT:
+                break
+            name = clean(item.get("name", ""))
+            if not name:
+                continue
+            tags = []
+            if multi:
+                tags.append(
+                    CHARACTERS.get(
+                        str(item.get("color", "")), str(item.get("color", ""))
+                    )
+                )
+            cost = "X" if item.get("is_x_cost") else item.get("cost")
+            if cost is not None:
+                tags.append(f"{cost}费")
+            if not spec.get("rarity") and item.get("rarity"):
+                tags.append(str(item["rarity"]))
+            lines.append(f"{name}（{' · '.join(tags)}）" if tags else name)
+            shown += 1
+        if lines:
+            add("卡牌列表", lines)
+        if len(items) > shown:
+            info.append(f"条目较多，仅列出前 {shown} 张，完整列表见来源页。")
+        add("基本信息", [*info, *lines[:3]])
+
+    async def _relic_list_sections(self, spec, add):
+        params = {"lang": "zhs"}
+        color = spec.get("color", "")
+        if color:
+            params["pool"] = color
+        data = await self.client.get("/api/relics", params, self.page_ttl)
+        items = self._list_items(data)
+        info = [f"共 {len(items)} 个遗物。"]
+        if color:
+            info.append(f"角色：{CHARACTERS.get(color, color)}")
+        lines = []
+        for item in items[:LIST_LIMIT]:
+            name = clean(item.get("name", ""))
+            if not name:
+                continue
+            rarity = str(item.get("rarity") or "")
+            lines.append(f"{name}（{rarity}）" if rarity else name)
+        if lines:
+            add("遗物列表", lines)
+        add("基本信息", [*info, *lines[:3]])
+
+    async def _potion_list_sections(self, add):
+        data = await self.client.get("/api/potions", {"lang": "zhs"}, self.page_ttl)
+        items = self._list_items(data)
+        lines = []
+        for item in items[:LIST_LIMIT]:
+            name = clean(item.get("name", ""))
+            if not name:
+                continue
+            rarity = str(item.get("rarity") or "")
+            lines.append(f"{name}（{rarity}）" if rarity else name)
+        if lines:
+            add("药水列表", lines)
+        add("基本信息", [f"共 {len(items)} 瓶药水。", *lines[:3]])
+
+    async def _rank_list_sections(self, kind, spec, add):
+        plural = "cards" if kind == "card" else "relics"
+        params = {"lang": "zhs"}
+        color = spec.get("color", "")
+        if color:
+            params["color" if kind == "card" else "pool"] = color
+        try:
+            data = await self.client.get(f"/api/{plural}", params, self.page_ttl)
+            scores = await self.client.get(
+                f"/api/runs/scores/{plural}", {"lang": "zhs"}, self.page_ttl
+            )
+        except WikiError:
+            data, scores = [], {}
+        items = self._list_items(data)
+        rows = []
+        for item in items:
+            score = (
+                scores.get(str(item.get("id", "")).upper())
+                if isinstance(scores, dict)
+                else None
+            )
+            if isinstance(score, dict) and score.get("win_rate") is not None:
+                rows.append(
+                    (float(score["win_rate"]), int(score.get("picks") or 0), item)
+                )
+        rows.sort(key=lambda row: (-row[0], -row[1]))
+        info = [LIST_NOTE]
+        if color:
+            info.append(f"角色：{CHARACTERS.get(color, color)}")
+        if not rows:
+            add("基本信息", info + ["暂无社区对局数据。"])
+            return
+        multi = len({str(item.get("color", "")) for _, _, item in rows}) > 1
+        lines = []
+        for index, (win_rate, picks, item) in enumerate(rows[:RANK_LIMIT], 1):
+            name = clean(item.get("name", ""))
+            if not name:
+                continue
+            tags = []
+            if multi:
+                tags.append(
+                    CHARACTERS.get(
+                        str(item.get("color", "")), str(item.get("color", ""))
+                    )
+                )
+            label = f"{name}（{' · '.join(tags)}）" if tags else name
+            lines.append(f"{index}. {label}：胜率 {win_rate:g}%，选取 {picks} 次")
+        add("胜率排行", lines + ["社区统计，仅供参考。"])
+        add("基本信息", [*info, *lines[:3]])
+
+    async def _character_rank_sections(self, add):
+        try:
+            stats = await self.client.get(
+                "/api/runs/community-stats", {}, self.page_ttl
+            )
+        except WikiError:
+            stats = {}
+        rows = stats.get("by_character") if isinstance(stats, dict) else []
+        ranked = sorted(
+            (item for item in rows or [] if isinstance(item, dict)),
+            key=lambda item: item.get("win_rate") or 0,
+            reverse=True,
+        )
+        info = [LIST_NOTE]
+        if not ranked:
+            add("基本信息", info + ["暂无社区对局数据。"])
+            return
+        lines = []
+        for index, item in enumerate(ranked, 1):
+            name = CHARACTERS.get(str(item.get("id", "")), str(item.get("id", "")))
+            parts = [f"胜率 {item.get('win_rate', '?')}%"]
+            if item.get("share") is not None:
+                parts.append(f"使用占比 {item['share']}%")
+            if item.get("runs") is not None:
+                parts.append(f"{item['runs']} 局")
+            lines.append(f"{index}. {name}：{'，'.join(parts)}")
+        add("胜率排行", lines + ["社区统计，仅供参考。"])
+        add("基本信息", [*info, *lines[:3]])
+
     @staticmethod
     def _community_key(text):
         if any(word in text for word in ("致命", "容易死", "死因", "死亡")):
@@ -811,6 +1175,12 @@ class SpireCodexService:
 
     async def _meta_result(self, query, question):
         text = f"{query} {question}"
+        if "进阶" in text and any(
+            word in text for word in ("解锁", "怎么开", "如何开")
+        ):
+            return await self._entry(
+                "ascension", await self._ascension_unlock_entity(), question, ""
+            )
         match = re.search(r"进阶\s*(\d{1,2})", text)
         if match:
             level = int(match.group(1))
@@ -860,6 +1230,27 @@ class SpireCodexService:
                             question,
                             "",
                         )
+        if "解锁" not in text:
+            # “卡牌怎么获得”：generic acquisition is mechanics content
+            # (reward odds/shop/boss), not a specific entity page.
+            for label, slug in ACQUISITION_MECHANICS:
+                if label in text and any(word in text for word in ACQUISITION_WORDS):
+                    try:
+                        entity = await self._detail("mechanic", slug)
+                    except WikiError:
+                        entity = None
+                    if isinstance(entity, dict):
+                        return await self._entry("mechanic", entity, question, "")
+        # “分数怎么算/问号房有什么”：系统级概念直连对应机制页，比英文
+        # 搜索候选更稳。
+        for words, slug in CONCEPT_MECHANICS:
+            if any(word in text for word in words):
+                try:
+                    entity = await self._detail("mechanic", slug)
+                except WikiError:
+                    entity = None
+                if isinstance(entity, dict):
+                    return await self._entry("mechanic", entity, question, "")
         community_key = self._community_key(text)
         if community_key:
             try:
@@ -950,17 +1341,243 @@ class SpireCodexService:
                 return await self._entry("act", item, question, "")
         return None
 
+    @staticmethod
+    def _list_intent(query, question):
+        """Detect list/filter/rank questions like 铁甲战士遗物池.
+
+        Returns a spec dict for synthetic list results, or None when the
+        question is about a concrete entity. Community-deletion questions
+        (删什么牌) and deck-build words (卡组) stay on their existing paths.
+        """
+        text = f"{query} {question}"
+        if "删" in text or any(word in text for word in DECK_WORDS):
+            return None
+        if "遗物" in text:
+            kind = "relic"
+        elif "药水" in text:
+            kind = "potion"
+        elif "卡牌" in text or "牌" in text:
+            kind = "card"
+        elif "角色" in text:
+            kind = "character"
+        elif "苦痛" in text or "诅咒" in text:
+            kind = "affliction"
+        elif "充能球" in text:
+            kind = "orb"
+        elif "关键词" in text:
+            kind = "keyword"
+        elif "附魔" in text:
+            kind = "enchantment"
+        elif "事件" in text:
+            kind = "event"
+        else:
+            kind = ""
+        color = ""
+        for key, name in CHARACTERS.items():
+            if name in text:
+                color = key
+                break
+        rank = any(word in text for word in RANK_WORDS)
+        listing = any(word in text for word in LIST_ALL_WORDS)
+        strong = any(word in text for word in RANK_GENERIC_WORDS)
+        if kind == "relic" and ("boss" in text.lower() or "首领" in text):
+            # STS2 没有 Boss 遗物分类：说明稀有度结构而不是给全量列表。
+            return {"mode": "note", "kind": "relic", "topic": "boss"}
+        if kind in {"card", "relic"} and rank and (color or strong):
+            return {"mode": "rank", "kind": kind, "color": color}
+        if kind == "character" and rank and strong:
+            return {"mode": "rank", "kind": "character", "color": ""}
+        if listing and kind in {"card", "relic", "potion", *REFERENCE_LIST_KINDS}:
+            rarity, card_type = "", ""
+            if kind == "card":
+                if re.search(r"稀有(?!度)", text):
+                    rarity = "Rare"
+                elif "基础" in text:
+                    rarity = "Basic"
+                elif "普通" in text:
+                    rarity = "Common"
+                elif "罕见" in text:
+                    rarity = "Uncommon"
+                elif "先古" in text:
+                    rarity = "Ancient"
+                card_type = next(
+                    (key for word, key in CARD_TYPE_KEYS.items() if word in text), ""
+                )
+            return {
+                "mode": "list",
+                "kind": kind,
+                "color": color,
+                "rarity": rarity,
+                "type": card_type,
+            }
+        if not kind and rank and any(word in text for word in RANK_TOPIC_WORDS):
+            # 当前版本Tier / 中文Tier表 → the community card ranking.
+            return {"mode": "rank", "kind": "card", "color": ""}
+        return None
+
+    @staticmethod
+    def _list_key(spec):
+        kind, color = spec["kind"], spec.get("color", "")
+        if spec["mode"] == "note":
+            return f"RELICS_NOTE_{spec.get('topic', 'boss').upper()}"
+        if spec["mode"] == "rank":
+            if kind == "character":
+                return "RANK_CHARACTERS"
+            head = "RANK_CARDS" if kind == "card" else "RANK_RELICS"
+            if color:
+                joiner = "COLOR" if kind == "card" else "POOL"
+                return f"{head}_{joiner}_{color.upper()}"
+            return head
+        if kind == "relic":
+            return f"RELICS_POOL_{color.upper()}" if color else "RELICS"
+        if kind == "potion":
+            return "POTIONS"
+        if kind in REFERENCE_LIST_KINDS:
+            return LIST_KEY_BY_KIND[kind]
+        parts = ["CARDS"]
+        if color:
+            parts += ["COLOR", color.upper()]
+        if spec.get("rarity"):
+            parts += ["RARITY", spec["rarity"].upper()]
+        if spec.get("type"):
+            parts += ["TYPE", spec["type"].upper()]
+        return "_".join(parts)
+
+    @staticmethod
+    def _parse_list_key(key):
+        tokens = str(key).upper().split("_")
+        mode = "list"
+        if tokens[:1] == ["RANK"]:
+            mode = "rank"
+            tokens = tokens[1:]
+        kinds = {
+            "CARDS": "card",
+            "RELICS": "relic",
+            "POTIONS": "potion",
+            "CHARACTERS": "character",
+            "AFFLICTIONS": "affliction",
+            "ORBS": "orb",
+            "KEYWORDS": "keyword",
+            "ENCHANTMENTS": "enchantment",
+            "EVENTS": "event",
+        }
+        kind = kinds.get(tokens[0]) if tokens else None
+        if kind is None:
+            return None
+        spec = {"mode": mode, "kind": kind, "color": "", "rarity": "", "type": ""}
+        if tokens[1:2] == ["NOTE"]:
+            spec["mode"] = "note"
+            spec["topic"] = tokens[2].lower() if len(tokens) > 2 else ""
+            return spec
+        index = 1
+        while index < len(tokens):
+            tag = tokens[index]
+            if index + 1 >= len(tokens) or tag not in {
+                "COLOR",
+                "POOL",
+                "RARITY",
+                "TYPE",
+            }:
+                return None
+            value = tokens[index + 1]
+            if tag in {"COLOR", "POOL"}:
+                spec["color"] = value.lower()
+            elif tag == "RARITY":
+                spec["rarity"] = value.capitalize()
+            else:
+                spec["type"] = value.capitalize()
+            index += 2
+        return spec
+
+    @staticmethod
+    def _list_title(spec):
+        color = spec.get("color", "")
+        name = CHARACTERS.get(color, "") if color else ""
+        kind = spec.get("kind", "")
+        if spec.get("mode") == "note":
+            return f"{LIST_LABELS.get(kind, '')}分类说明"
+        if spec.get("mode") == "rank":
+            if kind == "character":
+                return "角色胜率排行"
+            label = LIST_LABELS.get(kind, "")
+            return f"{name or '全部'}{label}胜率排行"
+        if kind == "relic":
+            return f"{name}遗物池" if name else "遗物列表"
+        label = LIST_LABELS.get(kind, "列表")
+        return f"{name or '全部'}{label}列表"
+
+    def _list_entity(self, key):
+        spec = self._parse_list_key(key)
+        if spec is None:
+            return None
+        return {"id": str(key).upper(), "title": self._list_title(spec), "spec": spec}
+
+    @staticmethod
+    def _list_keys():
+        """Every list key this service can mint.
+
+        page_id hashing is not reversible; after a restart the in-memory map
+        is gone, so reads recover list entities by re-hashing this closed set.
+        """
+        keys = {"RELICS", "POTIONS", "RANK_CHARACTERS", "RANK_CARDS", "RANK_RELICS"}
+        keys.update(LIST_KEY_BY_KIND.values())
+        keys.add("RELICS_NOTE_BOSS")
+        for pool in CHARACTERS:
+            keys.add(f"RELICS_POOL_{pool.upper()}")
+            keys.add(f"RANK_CARDS_COLOR_{pool.upper()}")
+            keys.add(f"RANK_RELICS_POOL_{pool.upper()}")
+        for color in ("", *CHARACTERS):
+            base = f"CARDS_COLOR_{color.upper()}" if color else "CARDS"
+            keys.add(base)
+            for rarity in CARD_RARITY_KEYS.values():
+                keys.add(f"{base}_RARITY_{rarity.upper()}")
+                for card_type in CARD_TYPE_KEYS.values():
+                    keys.add(f"{base}_RARITY_{rarity.upper()}_TYPE_{card_type.upper()}")
+                    keys.add(f"{base}_TYPE_{card_type.upper()}")
+        return keys
+
     async def _search(self, query, question):
         version = await self._version()
         original = query
         # The AI tool may pass a raw A10/N10/敲牌 query; normalize before
         # aliases and kind-prefix handling so the same rules apply.
         query = normalize_slang(query, self.profile)
+        # “诅咒是什么/易伤是什么意思”：剥掉释义后缀，回到条目或概念路径。
+        for suffix in ("是什么意思", "是什么"):
+            head = query[: -len(suffix)] if query.endswith(suffix) else ""
+            if len(head) >= 2:
+                query = head
+                break
         query, prefix_kind = self._split_kind_prefix(query)
         query, qualifier = self._split_qualified(query)
         if not question:
             query, question = self._split_aspect(query)
         normalized = self.aliases.get(query, query)
+        # List/filter/rank questions never match a single entity; resolve them
+        # before the per-language search so no fuzzy candidates leak in.
+        list_spec = self._list_intent(normalized, question)
+        list_entity = (
+            self._list_entity(self._list_key(list_spec)) if list_spec else None
+        )
+        if list_spec is not None and list_entity is not None:
+            if not question:
+                if list_spec["mode"] == "rank":
+                    question = "胜率排行"
+                elif list_spec["mode"] == "note":
+                    question = "基本信息"
+                else:
+                    question = LIST_QUESTION_DEFAULTS.get(list_spec["kind"], "列表")
+            result = await self._entry("list", list_entity, question, "")
+            return {
+                **result,
+                **{
+                    "query": original,
+                    "normalized_query": normalized,
+                    "question": question,
+                    "game": "sts2",
+                    "data_version": version,
+                },
+            }
         data = None
         items = []
         wanted = name_key(normalized)
@@ -1302,6 +1919,12 @@ class SpireCodexService:
                     "意图",
                     "血量",
                     "生命值",
+                    "怎么打",
+                    "打法",
+                    "应对",
+                    "怎么对付",
+                    "对策",
+                    "打不过",
                 ),
             ),
             ("encounter", ("遭遇",)),
@@ -1380,6 +2003,32 @@ class SpireCodexService:
     def _url(self, kind, key):
         if str(key).startswith("cn:") and self.chinese is not None:
             return self.chinese.url(str(key))
+        if kind == "list":
+            upper = str(key).upper()
+            if upper.startswith("RANK_CARDS"):
+                return f"{self.base}/zhs/stats/cards"
+            if upper.startswith("RANK_RELICS"):
+                return f"{self.base}/zhs/stats/relics"
+            if upper == "RANK_CHARACTERS":
+                return f"{self.base}/zhs/stats"
+            if upper.startswith("RELICS"):
+                return f"{self.base}/zhs/relics"
+            if upper == "POTIONS":
+                return f"{self.base}/zhs/potions"
+            for list_kind, page in (
+                ("AFFLICTIONS", "afflictions"),
+                ("ORBS", "orbs"),
+                ("KEYWORDS", "keywords"),
+                ("ENCHANTMENTS", "enchantments"),
+                ("EVENTS", "events"),
+            ):
+                if upper == list_kind:
+                    return f"{self.base}/zhs/{page}"
+            return f"{self.base}/zhs/cards"
+        if kind == "ascension" and str(key) == "UNLOCK":
+            # The site has no per-level ascension route; the unlocks page is
+            # its progression overview.
+            return f"{self.base}/zhs/unlocks"
         if kind == "glossary":
             # Glossary terms are listed on the reference page; there is no
             # per-term frontend route.
@@ -1441,6 +2090,10 @@ class SpireCodexService:
     async def _detail(self, kind, key):
         if str(key).startswith("cn:") and self.chinese is not None:
             return await self.chinese.read(str(key))
+        if kind == "list":
+            return self._list_entity(key)
+        if kind == "ascension" and str(key) == "UNLOCK":
+            return await self._ascension_unlock_entity()
         if kind == "unlock":
             items = await self._unlock_index()
             key = str(key)
@@ -1499,6 +2152,17 @@ class SpireCodexService:
         kind = KIND_BY_CODE.get(page_id >> 48)
         if kind is None:
             raise WikiError("bad_input", "无效的 Spire Codex page_id。")
+        if kind == "list":
+            # List keys encode their filters; re-derive them from the closed
+            # key set instead of pulling a kind index that does not exist.
+            key = next(
+                (key for key in self._list_keys() if entry_id("list", key) == page_id),
+                "",
+            )
+            entity = await self._detail("list", key) if key else None
+            if entity is None:
+                raise WikiError("not_found", "Spire Codex 中未找到该条目，请重新搜索。")
+            return await self._entry("list", entity, question, section)
         entity = next(
             (
                 item
@@ -1610,6 +2274,10 @@ class SpireCodexService:
             for word in ("选哪个", "怎么选", "选择", "选项", "社区选择")
         ):
             await self._event_community_section(entity, add)
+        if kind == "act" and any(word in guide_text for word in MONSTER_TACTIC_WORDS):
+            lines = await self._boss_tactics(entity)
+            if lines:
+                add("BOSS应对", lines)
         if kind in PAIRING_TYPES and any(
             word in question + section for word in COMMUNITY_WORDS
         ):
@@ -1786,6 +2454,8 @@ class SpireCodexService:
             self._merchant_sections(entity, add)
         elif kind == "community":
             await self._community_meta_sections(entity, add)
+        elif kind == "list":
+            await self._list_sections(entity, add)
         else:
             self._generic_sections(kind, entity, add)
 
@@ -1883,11 +2553,11 @@ class SpireCodexService:
         if entity.get("type"):
             info.append(f"类型：{MONSTER_TYPES.get(entity['type'], entity['type'])}")
         if entity.get("min_hp") is not None:
-            info.append(f"生命：{entity['min_hp']}–{entity.get('max_hp', '?')}")
+            info.append(f"生命：{entity['min_hp']}–{entity.get('max_hp') or '?'}")
         if entity.get("min_hp_ascension") is not None:
             info.append(
                 "进阶生命："
-                f"{entity['min_hp_ascension']}–{entity.get('max_hp_ascension', '?')}"
+                f"{entity['min_hp_ascension']}–{entity.get('max_hp_ascension') or '?'}"
             )
         encounters = entity.get("encounters") or []
         acts = sorted({item.get("act") for item in encounters if item.get("act")})
@@ -1943,6 +2613,9 @@ class SpireCodexService:
         sequence = self._attack_pattern_lines(entity, pattern)
         if sequence:
             add("出招顺序", sequence)
+        tactics = self._monster_tactics(entity)
+        if tactics:
+            add("打法要点", tactics)
         innate = entity.get("innate_powers") or []
         if innate:
             add(
@@ -2013,6 +2686,86 @@ class SpireCodexService:
         elif pattern.get("type") == "conditional" and len(lines) > 1:
             lines.insert(0, "按条件选择以下招式：")
         return lines[:7]
+
+    @staticmethod
+    def _monster_tactics(entity):
+        """Data-only tactics digest: biggest hit, opening move, innate powers.
+
+        Everything comes from moves/attack_pattern; there is no per-boss
+        community guide data, so nothing here is invented.
+        """
+        moves = [move for move in entity.get("moves") or [] if isinstance(move, dict)]
+        names = {str(move.get("id")): move.get("name", "") for move in moves}
+        lines = []
+        attacks = []
+        for move in moves:
+            damage = move.get("damage")
+            if isinstance(damage, dict) and damage.get("normal") is not None:
+                hits = damage.get("hit_count") or 1
+                attacks.append((damage["normal"] * hits, move))
+        if attacks:
+            attacks.sort(key=lambda pair: pair[0], reverse=True)
+            move = attacks[0][1]
+            damage = move["damage"]
+            text = f"最高伤害招式：{move.get('name', '未知')}（伤害 {damage['normal']}"
+            if damage.get("hit_count"):
+                text += f"×{damage['hit_count']}"
+            if damage.get("ascension") is not None:
+                text += f"，进阶 {damage['ascension']}"
+            lines.append(text + "）。")
+        pattern = entity.get("attack_pattern") or {}
+        initial = pattern.get("initial_move")
+        if initial and str(initial) in names:
+            lines.append(f"首回合使用：{names[str(initial)]}。")
+        if pattern.get("type") == "random":
+            lines.append("招式随机释放，按每回合意图应对。")
+        elif pattern.get("type") == "conditional":
+            lines.append("招式按条件选择，注意其触发前提。")
+        innate = entity.get("innate_powers") or []
+        if innate:
+            lines.append(
+                "开局带有："
+                + "、".join(
+                    f"{item.get('power')} {item.get('amount')}"
+                    if isinstance(item, dict)
+                    else str(item)
+                    for item in innate
+                )
+                + "。"
+            )
+        if entity.get("min_hp_ascension") is not None:
+            lines.append(
+                f"进阶生命 {entity['min_hp_ascension']}–"
+                f"{entity.get('max_hp_ascension') or '?'}。"
+            )
+        return lines
+
+    async def _boss_tactics(self, entity):
+        """Per-boss tactics lines for an act's bosses, from the monster index."""
+        try:
+            index = await self._index("monster", "zhs")
+        except WikiError:
+            return []
+        by_id = {
+            item.get("id"): item
+            for item in index
+            if isinstance(item, dict) and item.get("id")
+        }
+        lines = []
+        for boss_id in entity.get("bosses") or []:
+            # Act payloads reference boss encounters ({NAME}_BOSS); the
+            # monster index keys the plain {NAME}.
+            wanted = str(boss_id).upper()
+            candidates = [wanted, self._normalize_id(wanted)]
+            if wanted.endswith("_BOSS"):
+                candidates.append(wanted[: -len("_BOSS")])
+            boss = next((by_id[key] for key in candidates if key in by_id), None)
+            if not isinstance(boss, dict):
+                continue
+            points = self._monster_tactics(boss)
+            if points:
+                lines.append(f"{boss.get('name', boss_id)}：" + "；".join(points[:2]))
+        return lines
 
     async def _event_community_section(self, entity, add):
         try:
@@ -2178,6 +2931,20 @@ class SpireCodexService:
             add("效果", [desc])
 
     async def _ascension_sections(self, entity, add):
+        levels = entity.get("levels")
+        if isinstance(levels, list):
+            add("基本信息", ["名称：进阶解锁规则", *ASCENSION_RULES])
+            add("解锁规则", ASCENSION_RULES)
+            add(
+                "进阶效果",
+                [
+                    f"进阶{item.get('level', '?')} {clean(item.get('name', ''))}："
+                    f"{clean(item.get('description', ''))}"
+                    for item in levels
+                    if isinstance(item, dict)
+                ],
+            )
+            return
         description = clean(entity.get("description") or "")
         add(
             "基本信息",

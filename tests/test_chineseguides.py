@@ -44,6 +44,13 @@ GUIDE_HTML = """
 </body></html>
 """
 
+ASCENSION_HTML = """
+<html><body>
+  <h1>进阶指南</h1>
+  <article><p>一至十级进阶需要逐级通关第三章解锁。</p></article>
+</body></html>
+"""
+
 SILENT_HTML = """
 <html><body>
   <h1>静默猎手</h1>
@@ -55,6 +62,33 @@ IRONCLAD_HTML = """
 <html><body>
   <h1>铁甲战士</h1>
   <main><section><p>铁甲战士靠力量和消耗取胜。</p></section></main>
+</body></html>
+"""
+
+TIPS_HTML = """
+<main>
+  <a href="/zh-cn/tips/boss-guide/">
+    BOSS 打法指南 每章首领的应对要点与危险招式。
+  </a>
+  <a href="/zh-cn/tips/shop-campfire-strategy/">
+    商店与篝火策略 金币怎么花、篝火怎么选。
+  </a>
+  <a href="/zh-cn/tips/solo-vs-co-op/">
+    先玩单人还是合作 单人更清晰，合作更适合一起玩。
+  </a>
+  <a href="/zh-cn/tips/best-combos/">
+    最强卡牌组合 哪些连动真正值得围绕构筑。
+  </a>
+  <a href="/zh-cn/tips/enchantments/">
+    附魔怎么选 附魔是长期成长系统。
+  </a>
+</main>
+"""
+
+TIP_HTML = """
+<html><body>
+  <h1>BOSS 打法指南</h1>
+  <main><section><p>第一章首领注意力量叠加，按意图应对。</p></section></main>
 </body></html>
 """
 
@@ -259,3 +293,132 @@ def test_chinese_source_honors_429_cooldown(tmp_path):
 
     asyncio.run(run())
     assert len(calls) == 1
+
+
+def test_guide_list_falls_back_to_sts2front_tips(tmp_path):
+    """sts2.info/zh/guides WAF-blocks Python clients (deterministic 503)."""
+
+    def handler(request):
+        path = request.url.path
+        if path == "/zh/guides":
+            return httpx.Response(503, text="blocked")
+        if path == "/zh-cn/tips/":
+            return httpx.Response(200, text=TIPS_HTML)
+        if path == "/zh-cn/tips/boss-guide/":
+            return httpx.Response(200, text=TIP_HTML)
+        return httpx.Response(404, text="Not Found")
+
+    service = ChineseGuideService(
+        Cache(Path(tmp_path)), timeout=5, transport=httpx.MockTransport(handler)
+    )
+
+    async def run():
+        try:
+            guide = await service.guide("BOSS攻略", "攻略")
+            read = await service.read(guide["key"])
+            return guide, read
+        finally:
+            await service.close()
+
+    guide, read = asyncio.run(run())
+    assert guide["key"] == "cn:guide:sts2front:tips:boss-guide"
+    assert guide["url"].endswith("/zh-cn/tips/boss-guide/")
+    assert "意图" in guide["text"]
+    assert "力量叠加" in read["content"]
+    assert service.url("cn:guide:sts2front:tips:boss-guide").endswith(
+        "/zh-cn/tips/boss-guide/"
+    )
+
+
+def test_guide_sts2info_still_wins_when_reachable(tmp_path):
+    def handler(request):
+        path = request.url.path
+        if path == "/zh/guides":
+            return httpx.Response(200, text=GUIDES_HTML)
+        if path == "/zh/guides/ascension-guide":
+            return httpx.Response(200, text=ASCENSION_HTML)
+        if path == "/zh-cn/tips/":
+            raise AssertionError("reachable STS2.INFO must short-circuit the fallback")
+        return httpx.Response(404, text="Not Found")
+
+    service = ChineseGuideService(
+        Cache(Path(tmp_path)), timeout=5, transport=httpx.MockTransport(handler)
+    )
+
+    async def run():
+        try:
+            return await service.guide("进阶", "")
+        finally:
+            await service.close()
+
+    guide = asyncio.run(run())
+    assert guide["key"] == "cn:guide:sts2info:ascension-guide"
+    assert "逐级" in guide["text"]
+
+
+def test_guide_sts2info_tarpit_falls_back_to_tips(tmp_path):
+    async def handler(request):
+        path = request.url.path
+        if path == "/zh/guides":
+            await asyncio.sleep(30)  # WAF tarpit: neither 503 nor a response
+            return httpx.Response(200, text=GUIDES_HTML)
+        if path == "/zh-cn/tips/":
+            return httpx.Response(200, text=TIPS_HTML)
+        if path == "/zh-cn/tips/boss-guide/":
+            return httpx.Response(200, text=TIP_HTML)
+        return httpx.Response(404, text="Not Found")
+
+    service = ChineseGuideService(
+        Cache(Path(tmp_path)), timeout=4, transport=httpx.MockTransport(handler)
+    )
+
+    async def run():
+        try:
+            return await asyncio.wait_for(service.guide("BOSS攻略", "攻略"), 15)
+        finally:
+            await service.close()
+
+    guide = asyncio.run(run())
+    assert guide["key"] == "cn:guide:sts2front:tips:boss-guide"
+
+
+def test_tips_ranking_matches_coop_deck_and_enchant_questions(tmp_path):
+    def handler(request):
+        path = request.url.path
+        if path == "/zh/guides":
+            return httpx.Response(503, text="blocked")
+        if path == "/zh-cn/tips/":
+            return httpx.Response(200, text=TIPS_HTML)
+        if path == "/zh-cn/tips/solo-vs-co-op/":
+            return httpx.Response(200, text=TIP_HTML)
+        if path == "/zh-cn/tips/best-combos/":
+            return httpx.Response(
+                200,
+                text="<html><body><h1>最强卡牌组合</h1><main><section>"
+                "<p>围绕一张核心卡构筑，而不是全拿。</p></section></main></body></html>",
+            )
+        if path == "/zh-cn/tips/enchantments/":
+            return httpx.Response(
+                200,
+                text="<html><body><h1>附魔怎么选</h1><main><section>"
+                "<p>附魔优先强化核心输出牌。</p></section></main></body></html>",
+            )
+        return httpx.Response(404, text="Not Found")
+
+    service = ChineseGuideService(
+        Cache(Path(tmp_path)), timeout=5, transport=httpx.MockTransport(handler)
+    )
+
+    async def run():
+        try:
+            coop = await service.guide("联机怎么玩", "")
+            deck = await service.guide("卡组推荐", "")
+            enchant = await service.guide("附魔怎么选", "")
+            return coop, deck, enchant
+        finally:
+            await service.close()
+
+    coop, deck, enchant = asyncio.run(run())
+    assert coop["key"] == "cn:guide:sts2front:tips:solo-vs-co-op"
+    assert deck["key"] == "cn:guide:sts2front:tips:best-combos"
+    assert enchant["key"] == "cn:guide:sts2front:tips:enchantments"

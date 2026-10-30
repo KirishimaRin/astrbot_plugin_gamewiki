@@ -9,7 +9,6 @@ import argparse
 import asyncio
 import json
 import sys
-import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -17,6 +16,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from wiki.cache import Cache  # noqa: E402
 from wiki.chineseguides import ChineseGuideService  # noqa: E402
 from wiki.spirecodex import SpireCodexClient, SpireCodexService  # noqa: E402
+
+# Reuse parsed pages across runs: cold editorial fetches occasionally trip the
+# sources' WAF/rate heuristics, which reads as a false coverage failure. The
+# directory is inside gitignored research/ and carries the normal cache TTLs.
+CACHE_DIR = Path(__file__).resolve().parents[1] / "research" / "sts2-cache"
 
 # (query, question, expected section/text in the result or candidates)
 SEARCH_CASES = (
@@ -71,6 +75,27 @@ SEARCH_CASES = (
     ("角色行为", "", "角色行为"),
     ("进阶矩阵", "", "进阶矩阵"),
     ("Bash 效果", "", "效果"),
+    ("铁甲战士遗物池", "", "遗物列表"),
+    ("铁甲战士所有稀有攻击牌", "", "卡牌列表"),
+    ("静默猎手卡牌排行", "", "胜率排行"),
+    ("静默猎手卡牌胜率", "", "胜率排行"),
+    ("当前版本Tier", "", "胜率排行"),
+    ("角色胜率排行", "", "胜率排行"),
+    ("知识恶魔", "怎么打", "打法要点"),
+    ("第一章", "Boss怎么应对", "BOSS应对"),
+    ("卡牌怎么获得", "", "正文"),
+    ("遗物怎么获得", "", "正文"),
+    ("进阶怎么解锁", "", "解锁规则"),
+    ("分数怎么算", "", "正文"),
+    ("每日挑战", "", "正文"),
+    ("问号房有什么", "", "正文"),
+    ("联机怎么玩", "", "正文"),
+    ("附魔怎么选", "", "正文"),
+    ("卡组推荐", "", "正文"),
+    ("苦痛有哪些", "", "苦痛列表"),
+    ("充能球有哪些", "", "充能球列表"),
+    ("事件有哪些", "", "事件列表"),
+    ("BOSS遗物有哪些", "", "稀有度分布"),
 )
 COMPARE_CASES = (
     ("燃烧", "痛击"),
@@ -81,71 +106,71 @@ COMPARE_CASES = (
 
 async def main(strict=False, threshold=0.8):
     records, passed = [], 0
-    with tempfile.TemporaryDirectory() as directory:
-        cache = Cache(Path(directory))
-        client = SpireCodexClient(cache, timeout=20)
-        chinese = ChineseGuideService(cache, timeout=30)
-        service = SpireCodexService(client, timeout=45, chinese=chinese)
-        try:
-            for query, question, expected in SEARCH_CASES:
-                try:
-                    result = await service.search(query, question)
-                    status = result.get("status", "")
-                    sections = result.get("available_sections") or []
-                    text = "\n".join(
-                        item.get("text", "") for item in result.get("evidence", [])
-                    )
-                    candidates = "\n".join(
-                        item.get("title", "") for item in result.get("candidates", [])
-                    )
-                    ok = status in {"ok", "needs_choice"} and expected in (
-                        "\n".join(sections) + "\n" + text + "\n" + candidates
-                    )
-                    passed += int(ok)
-                    records.append(
-                        {
-                            "query": query,
-                            "question": question,
-                            "status": status,
-                            "expected": expected,
-                            "ok": ok,
-                        }
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    records.append(
-                        {
-                            "query": query,
-                            "question": question,
-                            "error": f"{type(exc).__name__}: {exc}",
-                            "ok": False,
-                        }
-                    )
-            for left, right in COMPARE_CASES:
-                try:
-                    result = await service.compare(left, right)
-                    ok = result.get("status") == "compare" and bool(
-                        result.get("dimensions")
-                    )
-                    passed += int(ok)
-                    records.append(
-                        {
-                            "query": f"{left} vs {right}",
-                            "status": result.get("status"),
-                            "dimensions": len(result.get("dimensions") or []),
-                            "ok": ok,
-                        }
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    records.append(
-                        {
-                            "query": f"{left} vs {right}",
-                            "error": f"{type(exc).__name__}: {exc}",
-                            "ok": False,
-                        }
-                    )
-        finally:
-            await client.close()
-            await chinese.close()
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cache = Cache(CACHE_DIR)
+    client = SpireCodexClient(cache, timeout=20)
+    chinese = ChineseGuideService(cache, timeout=30)
+    service = SpireCodexService(client, timeout=45, chinese=chinese)
+    try:
+        for query, question, expected in SEARCH_CASES:
+            try:
+                result = await service.search(query, question)
+                status = result.get("status", "")
+                sections = result.get("available_sections") or []
+                text = "\n".join(
+                    item.get("text", "") for item in result.get("evidence", [])
+                )
+                candidates = "\n".join(
+                    item.get("title", "") for item in result.get("candidates", [])
+                )
+                ok = status in {"ok", "needs_choice"} and expected in (
+                    "\n".join(sections) + "\n" + text + "\n" + candidates
+                )
+                passed += int(ok)
+                records.append(
+                    {
+                        "query": query,
+                        "question": question,
+                        "status": status,
+                        "expected": expected,
+                        "ok": ok,
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001
+                records.append(
+                    {
+                        "query": query,
+                        "question": question,
+                        "error": f"{type(exc).__name__}: {exc}",
+                        "ok": False,
+                    }
+                )
+        for left, right in COMPARE_CASES:
+            try:
+                result = await service.compare(left, right)
+                ok = result.get("status") == "compare" and bool(
+                    result.get("dimensions")
+                )
+                passed += int(ok)
+                records.append(
+                    {
+                        "query": f"{left} vs {right}",
+                        "status": result.get("status"),
+                        "dimensions": len(result.get("dimensions") or []),
+                        "ok": ok,
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001
+                records.append(
+                    {
+                        "query": f"{left} vs {right}",
+                        "error": f"{type(exc).__name__}: {exc}",
+                        "ok": False,
+                    }
+                )
+    finally:
+        await client.close()
+        await chinese.close()
 
     total = len(records)
     rate = passed / total if total else 0.0
