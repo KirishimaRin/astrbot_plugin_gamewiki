@@ -1,7 +1,7 @@
 name: astrbot_plugin_gamewiki
 display_name: 游戏百科
 short_desc: 英文指令与自然语言查询游戏百科，返回问题概览和 Wiki 链接。
-desc: 使用 ys、sr、zzz、ark、zmd 查询五款游戏百科；明日方舟优先 PRTS、异常时回退 BWIKI，终末地优先 AKEData、BWIKI 兜底，原神、星铁和绝区零使用 BWIKI。支持会话模型概览、来源链接、章节补读与原文摘录降级。
+desc: 使用 ys、sr、zzz、ark、zmd、sts2 查询六款游戏百科；明日方舟优先 PRTS、异常时回退 BWIKI，终末地优先 AKEData、BWIKI 兜底，杀戮尖塔2使用 Spire Codex，原神、星铁和绝区零使用 BWIKI。支持会话模型概览、来源链接、章节补读与原文摘录降级。
 version: "v0.3.1"
 author: KirishimaRin
 repo: https://github.com/KirishimaRin/astrbot_plugin_gamewiki

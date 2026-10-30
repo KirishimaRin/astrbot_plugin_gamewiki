@@ -1,0 +1,16 @@
+[
+ {
+  "app_id": 2868840,
+  "game_version": "1.3.1",
+  "build_id": "",
+  "tag": "1.3.1",
+  "date": "2026-10-18",
+  "title": "Replay scene view and browser, every stats page under /stats, Seed Finder and Deck Builder, chart builder, Top Players, site-wide search, supporter perks and themes, and a lot of memory work",
+  "summary": {
+   "added": 0,
+   "removed": 0,
+   "changed": 0
+  },
+  "steam_url": null
+ }
+]

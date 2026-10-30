@@ -10,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 
 from wiki.games import PROFILES
@@ -137,6 +138,95 @@ def test_games_default_and_invalid_config_enable_all_games(plugin, config):
         asyncio.run(configured.terminate())
 
 
+def test_sts2_command_and_tool_use_the_real_service(plugin):
+    instance, Event, module = plugin
+    relic = {
+        "id": "BURNING_BLOOD",
+        "name": "燃烧之血",
+        "description": "在战斗结束时，回复[green]6[/green]点生命。",
+        "rarity": "初始遗物",
+        "pool": "ironclad",
+        "image_url": "/static/images/relics/burning_blood.webp",
+    }
+
+    def handler(request):
+        path = request.url.path
+        if path == "/api/changelogs":
+            return httpx.Response(200, json=[{"game_version": "1.3.1"}])
+        if path == "/api/search":
+            return httpx.Response(
+                200,
+                json={
+                    "categories": [
+                        {
+                            "kind": "relic",
+                            "items": [
+                                {
+                                    "name": "燃烧之血",
+                                    "path": "/relics/burning_blood",
+                                    "subtitle": "初始遗物 · ironclad",
+                                }
+                            ],
+                        }
+                    ]
+                },
+            )
+        if path in {"/api/relics", "/api/relics/burning_blood"}:
+            payload = [relic] if path == "/api/relics" else relic
+            return httpx.Response(200, json=payload)
+        return httpx.Response(404, json={"detail": "Not Found"})
+
+    client = module.SpireCodexClient(
+        instance.cache, timeout=2, transport=httpx.MockTransport(handler)
+    )
+    service = module.SpireCodexService(client, timeout=2)
+    instance.services["sts2"] = service
+
+    async def check():
+        try:
+            event = Event("sts2 燃烧之血 效果")
+            assert [r async for r in instance.wiki_command_sts2(event)] == []
+            assert "燃烧之血" in event.sent[-1]
+            assert "6" in event.sent[-1]
+            page_id = next(iter(service._known))
+            result = json.loads(
+                await instance.wiki_read(Event(), page_id, "", "效果", "sts2")
+            )
+            assert result["status"] == "ok"
+            assert result["title"] == "燃烧之血"
+        finally:
+            await client.close()
+
+    asyncio.run(check())
+
+
+def test_sts2_chinese_sources_can_be_disabled(plugin):
+    instance, _, _ = plugin
+    enabled = type(instance)(object(), {"games": ["sts2"]})
+    disabled = type(instance)(
+        object(), {"games": ["sts2"], "sts2_chinese_sources": False}
+    )
+    try:
+        assert enabled.services["sts2"].chinese is not None
+        assert disabled.services["sts2"].chinese is None
+    finally:
+        asyncio.run(enabled.terminate())
+        asyncio.run(disabled.terminate())
+
+
+def test_sts2_custom_base_is_passed_to_client_and_service(plugin):
+    instance, _, _ = plugin
+    configured = type(instance)(
+        object(),
+        {"games": ["sts2"], "spire_codex_base": "https://example.test"},
+    )
+    try:
+        assert configured.services["sts2"].base == "https://example.test"
+        assert configured.clients[0].api == "https://example.test"
+    finally:
+        asyncio.run(configured.terminate())
+
+
 def test_existing_games_subset_is_preserved_and_duplicates_are_ignored(plugin):
     instance, _, _ = plugin
     configured = type(instance)(object(), {"games": ["ys", "ys", "sr", "invalid"]})
@@ -247,7 +337,7 @@ def test_session_override_persists_to_data_dir(plugin):
     ) == {"test:GroupMessage:7": True}
 
 
-@pytest.mark.parametrize("game", ["ys", "sr", "zzz", "arknights", "zmd"])
+@pytest.mark.parametrize("game", ["ys", "sr", "zzz", "arknights", "zmd", "sts2"])
 def test_public_commands_can_disable_inspect_and_restore_session(plugin, game):
     instance, Event, module = plugin
     profile = module.PROFILES[game]
@@ -398,7 +488,7 @@ def _wiki_page(title="纳西妲", page_id=42):
     }
 
 
-@pytest.mark.parametrize("game", ["ys", "sr", "zzz", "arknights", "zmd"])
+@pytest.mark.parametrize("game", ["ys", "sr", "zzz", "arknights", "zmd", "sts2"])
 def test_numbered_choices_and_plain_followups_use_selected_page_id(plugin, game):
     instance, Event, module = plugin
     search = AsyncMock(
@@ -1065,3 +1155,43 @@ def test_query_notice_is_skipped_for_help(plugin):
         assert len(event.sent) == 1 and "用法：" in event.sent[0]
     finally:
         asyncio.run(configured.terminate())
+
+
+def test_wiki_compare_tool_only_supports_sts2(plugin):
+    instance, Event, module = plugin
+    instance.services["sts2"] = SimpleNamespace(
+        profile=module.PROFILES["sts2"],
+        compare=AsyncMock(return_value={"status": "compare", "game": "sts2"}),
+    )
+    ok = json.loads(
+        asyncio.run(instance.wiki_compare(Event(), "燃烧之血", "红头骨", "", "sts2"))
+    )
+    assert ok["status"] == "compare"
+    unsupported = json.loads(
+        asyncio.run(instance.wiki_compare(Event(), "草神", "钟离", "", "ys"))
+    )
+    assert unsupported["code"] == "unsupported"
+
+
+def test_sts2_image_send_requests_webp_conversion(plugin):
+    import contextlib
+
+    instance, Event, module = plugin
+    seen = {}
+
+    @contextlib.asynccontextmanager
+    async def fake_image(url, cache=None, **kwargs):
+        seen.update(kwargs)
+        yield "/tmp/sts2-image.jpg"
+
+    event = Event("")
+    event.image_result = lambda path: ("image", path)
+    with patch.object(module, "prepared_image", fake_image):
+        asyncio.run(
+            instance._send_entry_image(
+                event,
+                "https://cdn.spire-codex.com/cards-full/stable/test.webp",
+                convert_webp=True,
+            )
+        )
+    assert seen.get("convert_webp") is True

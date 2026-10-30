@@ -1,0 +1,16 @@
+{
+ "id": "BURNING_BLOOD",
+ "name": "燃烧之血",
+ "description": "在战斗结束时，回复[green]6[/green]点生命。",
+ "description_raw": "在战斗结束时，回复[green]{Heal}[/green]点生命。",
+ "flavor": "[red]这个遗物的细节将在未来揭晓……[/red]",
+ "rarity": "初始遗物",
+ "rarity_key": "Starter",
+ "pool": "ironclad",
+ "merchant_price": null,
+ "image_url": "/static/images/relics/burning_blood.webp",
+ "image_variants": null,
+ "name_variants": null,
+ "notes": null,
+ "compendium_order": 4
+}

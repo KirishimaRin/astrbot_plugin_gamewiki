@@ -23,6 +23,8 @@ from .wiki.models import WikiError
 from .wiki.query import QueryService
 from .wiki.sources import ArknightsSources, EndfieldSources
 from .wiki.akedata import AkeClient, AkeService
+from .wiki.spirecodex import SpireCodexClient, SpireCodexService
+from .wiki.chineseguides import ChineseGuideService
 
 ADMIN_WORDS = {"stats", "clear-cache", "session", "doctor"}
 # Aligns with the conversation topic lifetime: followups inside one topic
@@ -60,6 +62,11 @@ class GameWiki(Star):
         self.model_timeout = number("model_timeout_seconds", 20, 2, 60)
         # 空串=跟随会话当前模型；否则固定使用该服务提供商。
         self.model_provider = str(config.get("model_provider", "") or "").strip()
+        # 杀戮尖塔2 可切换到自建 Spire Codex 实例；空串使用官方地址。
+        self.spire_codex_base = str(config.get("spire_codex_base", "") or "").strip()
+        self.spire_codex_cdn = str(config.get("spire_codex_cdn", "") or "").strip()
+        self.sts2_chinese_sources = bool(config.get("sts2_chinese_sources", True))
+        self.sts2_chinese_timeout = number("sts2_chinese_timeout_seconds", 20, 5, 60)
         self.model_fallback_hits = 0
         self.overview_chars = int(number("overview_chars", 250, 150, 500))
         data_root = Path(get_astrbot_data_path()) / "plugin_data"
@@ -85,8 +92,11 @@ class GameWiki(Star):
         # clear-cache must count and drop each entry exactly once.
         cache = Cache(directory)
         self.cache = cache
-        self.services: dict[str, QueryService | ArknightsSources | EndfieldSources] = {}
-        self.clients: list[WikiClient] = []
+        self.services: dict[
+            str,
+            QueryService | ArknightsSources | EndfieldSources | SpireCodexService,
+        ] = {}
+        self.clients: list[WikiClient | ChineseGuideService] = []
         self._image_slots = asyncio.Semaphore(2)
         # Sent portraits within one chat, kept until the conversation topic
         # would have expired; restarts reset it.
@@ -140,6 +150,34 @@ class GameWiki(Star):
                     primary,
                     build_service(code, "bwiki"),
                     timeout=number("query_timeout_seconds", 15, 5, 30),
+                )
+            elif code == "sts2":
+                client = SpireCodexClient(
+                    cache,
+                    number("timeout_seconds", 8, 2, 15),
+                    concurrency=int(number("upstream_concurrency", 2, 1, 8)),
+                    pace=number("upstream_pace_seconds", 0.3, 0.1, 2),
+                    base=self.spire_codex_base,
+                )
+                self.clients.append(client)
+                chinese = None
+                if self.sts2_chinese_sources:
+                    chinese = ChineseGuideService(
+                        cache,
+                        timeout=self.sts2_chinese_timeout,
+                    )
+                    self.clients.append(chinese)
+                self.services[code] = SpireCodexService(
+                    client,
+                    aliases={**global_aliases, **game_aliases.get(code, {})},
+                    timeout=number("query_timeout_seconds", 15, 5, 30),
+                    search_ttl=number("search_cache_seconds", 600, 0, 3600),
+                    # EA 期数据变动快，sts2 详情默认 1 小时而非全局 6 小时。
+                    page_ttl=number("sts2_page_cache_seconds", 3600, 600, 86400),
+                    max_chars=int(number("max_evidence_chars", 6000, 1000, 8000)),
+                    base=self.spire_codex_base,
+                    cdn=self.spire_codex_cdn,
+                    chinese=chinese,
                 )
             else:
                 self.services[code] = build_service(code, "bwiki")
@@ -538,7 +576,9 @@ class GameWiki(Star):
         await event.send(event.plain_result(notice + text))
         image_url = metrics.get("image_url") if isinstance(metrics, dict) else ""
         if self.image_reply and image_url:
-            await self._send_entry_image(event, image_url)
+            await self._send_entry_image(
+                event, image_url, convert_webp=profile.code == "sts2"
+            )
         card = metrics.get("card") if isinstance(metrics, dict) else None
         # The excerpt fallback already quotes the evidence verbatim; a card of
         # the same text would be a pure duplicate.
@@ -566,7 +606,9 @@ class GameWiki(Star):
         except Exception:
             logger.debug("证据卡片发送失败，忽略", exc_info=True)
 
-    async def _send_entry_image(self, event: AstrMessageEvent, image_url: str):
+    async def _send_entry_image(
+        self, event: AstrMessageEvent, image_url: str, *, convert_webp=False
+    ):
         key = (event.unified_msg_origin, image_url)
         now = time.monotonic()
         last = self._recent_images.get(key)
@@ -574,7 +616,8 @@ class GameWiki(Star):
             return
         try:
             async with self._image_slots:
-                async with prepared_image(image_url, self.cache) as image:
+                options = {"convert_webp": True} if convert_webp else {}
+                async with prepared_image(image_url, self.cache, **options) as image:
                     await event.send(event.image_result(image))
         except Exception:
             logger.debug("条目图片发送失败，忽略", exc_info=True)
@@ -645,6 +688,12 @@ class GameWiki(Star):
         async for reply in self._wiki_command(event, PROFILES["zmd"]):
             yield reply
 
+    @filter.command("sts2")
+    async def wiki_command_sts2(self, event: AstrMessageEvent):
+        """sts2 名称或问题：查询杀戮尖塔2 Spire Codex，返回概览和来源。"""
+        async for reply in self._wiki_command(event, PROFILES["sts2"]):
+            yield reply
+
     async def _tool_search(self, event, query, question, game):
         if not self._allowed(event):
             return {
@@ -692,6 +741,14 @@ class GameWiki(Star):
         if isinstance(page_id, float) and page_id.is_integer():
             page_id = int(page_id)
         question = normalize_slang(question, service.profile)
+        if game == "sts2":
+            if source and source != "spirecodex":
+                return {
+                    "status": "error",
+                    "code": "bad_input",
+                    "message": "杀戮尖塔2补读请留空 source 或填写 spirecodex。",
+                }
+            return await self._run(service.read, page_id, question, section)
         if game in {"arknights", "zmd"} or source:
 
             async def read_from_source():
@@ -745,6 +802,54 @@ class GameWiki(Star):
             source(string): 明日方舟和终末地必须填写搜索返回的 source_key（prts、akedata 或 bwiki），其他游戏可留空。
         """
         result = await self._tool_read(event, page_id, section, question, game, source)
+        return json.dumps(result, ensure_ascii=False)
+
+    @filter.llm_tool(name="wiki_compare")
+    async def wiki_compare(
+        self,
+        event: AstrMessageEvent,
+        query_a: str,
+        query_b: str,
+        question: str,
+        game: str = "sts2",
+    ) -> str:
+        """对比两个同类型游戏条目，返回字段差异和社区数据。
+
+        目前仅支持杀戮尖塔2（sts2）；用于“A和B哪个好”“A对比B”等问题。
+
+        Args:
+            query_a(string): 第一个条目名称。
+            query_b(string): 第二个条目名称。
+            question(string): 用户的完整问题，用于判断是否需要进一步解释。
+            game(string): 游戏代码，目前仅支持 sts2。
+        """
+        if not self._allowed(event):
+            return json.dumps(
+                {
+                    "status": "error",
+                    "code": "disabled",
+                    "message": "当前会话未启用百科查询。",
+                },
+                ensure_ascii=False,
+            )
+        service = self.services.get(game)
+        if game != "sts2" or service is None or not hasattr(service, "compare"):
+            return json.dumps(
+                {
+                    "status": "error",
+                    "code": "unsupported",
+                    "message": "wiki_compare 目前仅支持 game=sts2。",
+                },
+                ensure_ascii=False,
+            )
+        try:
+            self._limited(event)
+        except WikiError as exc:
+            return json.dumps(
+                {"status": "error", "code": exc.code, "message": str(exc)},
+                ensure_ascii=False,
+            )
+        result = await self._run(service.compare, query_a, query_b, question)
         return json.dumps(result, ensure_ascii=False)
 
     @filter.llm_tool(name="genshin_wiki_search")

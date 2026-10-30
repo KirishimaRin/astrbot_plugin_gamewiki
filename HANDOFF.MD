@@ -126,3 +126,169 @@
 
 - metadata、README、CHANGELOG 同步为 v0.3.1。
 - `query_notice`（默认 true）：限流校验通过后、`conversations.begin` 之前发送“正在查询<游戏名>百科，请稍候…”。放在 `_limited` 之后是刻意的——帮助、管理员指令、未启用会话、选择编号越界、限流拒绝都在此之前即时返回，不应先发提示。发送失败只记 debug 日志，不能中断查询。候选选择与追问同样会发提示；测试 fixture 显式关闭 `query_notice` 以聚焦结果断言，提示本身有专项用例。framework 契约脚本里所有 `event.sent` 断言已改为先校验提示、再校验结果。
+
+## 杀戮尖塔2 数据源调研（2026-10-30，尚未实施）
+
+- 结论：可行，主源选 Spire Codex 公共 REST API（https://spire-codex.com/api），不走 MediaWiki。BWIKI `slaythespire2` 站点统计 116 页面/0 条目；灰机 `sts2.huijiwiki.com` 的 `api.php` 与页面均被 Cloudflare 挑战页拦截且 robots 限制 AI 抓取；wanwiki 同样被 Cloudflare 拦截；urarawin 是静态 HTML、无 API，仅可作后续备选。
+- API 事实：`?lang=zhs` 返回游戏官方简中；`/api/stats` 为 cards 577、relics 296、monsters 115、events 66、potions 63、characters 5；`/api/search` 每类最多 5 条且会命中描述，候选必须精确名称优先；`/api/rate-limits` 无 Key 为 300/min per endpoint（开发者页写 15/min，属旧值）；当前 beta 数据版本 v0.111.0，游戏仍处 EA，schema 无 SLA。
+- 接入约束：新建 `wiki/spirecodex.py`，不要直接复用 `WikiClient` 的 JSON 层——`_read_json` 只接受 dict、`_fetch_and_cache` 假设 `query.search`、`request()` 会附加 MediaWiki 参数；列表端点返回数组。实体 ID 为 UPPER_SNAKE，但角色 `starting_deck/starting_relics` 是 PascalCase，需归一化。同名卡（如“打击”五角色各一张）必须带角色/类型消歧。
+- 清洗：描述含 `[gold]/[blue]/[sine]/[jitter]/[font_size=22]` 等游戏内 BBCode，需只删标签保留文字；能力 `description` 可能丢数值（如 Strength 的 `[blue][/blue]`），需用 `description_raw` 或明确标注。
+- 范围：v1 卡牌/遗物/药水/怪物/事件/角色；命令 `/sts2`，游戏代码 `sts2`；无备用源，失败时明确报错；证据卡片与卡图可复用现有路径，webp 需确认平台兼容。
+- 本次仅调研，未改运行逻辑；报告在 /data/workspace/answers/2026-10-30-sts2-wiki-research.html。
+
+## 杀戮尖塔2 接入实现（2026-10-30，分支 `feature/slay-the-spire-2-wiki`）
+
+- `SpireCodexService` 不是 MediaWiki：`WikiClient.get(path, params, ttl)` 复用缓存/合并/节流；`_is_empty`/`_validate_payload` 钩子区分数组响应。不要直接把 `request()` 用于 Spire Codex（会附加 `format=json`）。
+- `entry_id` 对 key 做 `.upper()`：搜索路径是小写 `strike_ironclad`，实体 ID 是大写 `STRIKE_IRONCLAD`；去掉归一会让 `read` 找不到候选。page_id 用 4-bit kind + 48-bit digest，`read` 通过对应 kind 的索引还原。
+- `_read` 拉取整类索引（卡牌约 655 KB），内存 `_indexes` + SQLite 双层缓存；不要改成逐个详情请求，角色初始卡组需要整卡索引。
+- 角色 `starting_deck/starting_relics` 是 PascalCase；`_normalize_id` 只对非 UPPER_SNAKE 插入下划线，避免 `BURNING_BLOOD` 被拆成单字母。
+- 搜索会命中描述且同名实体多：`search` 必须精确名称优先；同名候选带角色/类型标签，并设置 `choice_intro`，不能沿用“没有同名条目”的默认文案。
+- BBCode：`clean()` 把 `[energy:N]` 转 `N费`、空强调对 `[blue][/blue]` 转 `X`；能力 `description` 可能丢数值，`effect_text` 先 `description` 后 `description_raw`。不要把 `[gold]` 等标签原样送进卡片或模型。
+- `_tool_read` 对 sts2 单独处理：source 留空或 `spirecodex`；不要走 `read_from_source`（它只认 bwiki 且会拒绝其他游戏）。
+- 验证：`pytest -q` 409 passed；Ruff 通过；framework 4.5.7/4.29.3 通过；package 35 files/11,135,524 bytes；Spire Codex 冒烟 25/25；覆盖率审计诊断 52/54（仅“攻略/机制”因中文源超时回退英文），本地 `--strict` 阈值 80% 通过。
+- 尚无备用源；Spire Codex 故障时只能明确报错。未改版本号。
+
+## 杀戮尖塔2 计划内增强（2026-10-30）
+
+- 事件 `pages` 分支：排除 `INITIAL`/`FINISH`，按页去重、选项按 `(标题,描述)` 去重，最多 3 页；`分支` 的 specifics 必须排在 `选项` 之前，否则“其他选项”会先被更宽的“选项”命中。
+- 怪物 `attack_pattern.states` 转成 `出招顺序`：用 `moves` 的 `move_id→名称` 映射，cycle 按 `next` 走，conditional 只写“按条件选择”不展示 C# 条件；`_kind_hint` 把 出招/招式/意图/血量 归到 monster，用于区分同名怪物与遭遇。
+- `page_id→(kind,id)` 的 `_known` 映射让搜索后的 `read` 直接取详情，不再拉整类索引；进程重启后仍回退索引。角色初始卡组继续用整卡索引，因为一次要解析 10 个 ID。
+- 数据版本取 `/api/changelogs` 最新 `game_version`，缓存 1 小时；变化时清空 `_indexes` 与 `_known`。这是站点数据标记，不等于游戏 EA 版本号（`/api/beta/version` 才是 v0.11x 通道）。sts2 正文缓存默认 3600 秒，低于其他游戏的全局 6 小时。
+- `spire_codex_base` / `spire_codex_cdn` 可指向自建实例；客户端设置 base 后同步更新 `_host`，429 冷却按新主机隔离。
+- 真实响应 fixture 在 `tests/fixtures/spirecodex/`；`scripts/smoke_sts2.py` 做在线结构检查，已加入 CI `drift` 任务。
+- 术语/充能球/苦痛/关键词/附魔：`/api/search` 常把它们归到 `reference` 或完全不返回；`_term_exact` 在 reference 或无结果时按精确名称查小型列表。术语链接统一指向 `/zhs/reference`，没有逐术语前端路由。通用分节把描述同时放进 `基本信息`，否则裸名称只显示分类字段。
+- 搭配/推荐/胜率：仅当问题含 `搭配/推荐/选哪/胜率/强度/评分` 时请求 `/api/pairings`、`/api/draft-recs`、`/api/runs/scores`；pairings/draft 的比率是 0–1，scores 的 `win_rate` 已是百分数，两者不能共用同一个格式化函数。
+- webp：`prepared_image(..., convert_webp=True)` 只对 sts2 启用；`_download` 仍负责下载与 JPEG 转换，转换失败时回退原始 URL。不要把该开关应用到其他游戏，避免不必要下载。
+- 攻略/机制：`/api/search` 的 guide/mechanics 标题是英文，中文问题词（攻略/机制/规则/概率/BOSS/流派/卡组）先映射到英文关键词再搜；机械页面的搜索路径是 `/mechanics/{slug}`，API 详情是 `/api/mechanics/sections/{slug}`，两者不能共用一个 PATH。列表项用 `slug` 而不是 `id`，`_index`/`_detail` 统一补 `id` 后再算 page_id。
+- 攻略/机制正文是英文 markdown，`_markdown_text` 只做标题/链接/粗体/行内代码的扁平化；概览模型负责中文总结。不要把英文正文直接当作中文答案。
+- 仍未做：备用数据源、完整平台 webp 发送验收。
+
+## 杀戮尖塔2 黑话与中文编辑源（2026-10-30）
+
+- 进阶黑话：`A10/a10/N10/n10/难度10/进阶十` 统一为 `进阶10`；`A0/N0` 为 `进阶0`；`双Boss/双首领` 为 `进阶10`，已有 `进阶10` 时去掉重复描述。`进阶之灾` 不带数字，必须保持卡牌名，不能归一成进阶5。
+- 升级黑话：`火堆敲牌/敲牌/锻造/敲` → `升级`，`敲位` → `升级优先级`，`睡觉` → `休息`。长词必须排在单字“敲”之前；已核对 Spire Codex 实体名不含“敲/锻造/难度/敲位”，单字替换不会误伤条目。
+- 服务层 `_search` 也会对 query 调用 `normalize_slang`，因为 AI 工具可能直接把 `A10`/`敲牌` 当 query 传入；命令路径仍先归一整段输入。
+- 中文源：STS2.INFO 的 `/zh/mechanics` 按 `article` 卡片（状态名 + 效果/叠加/克制/协同）与 `h2` 分节解析；`/zh/guides` 列表按 `a[href^="/zh/guides/"]` 解析。STS2FRONT 仅在角色攻略缺失时兜底，读取 `/zh-cn/characters/{id}/` 的 `section`，过滤导航/来源/模板段落。
+- 中文源 HTML 较大（机制页约 440 KB、攻略列表约 350 KB），必须缓存 6 小时；`_chinese_timeout` 只给可选源 `min(8, timeout/2)` 秒，超时后回退 Spire Codex 英文，不能让中文源拖垮整个查询。
+- 概念路由：`伤害/易伤/格挡/商店/金币/稀有度/地图/精英/补丁/更新/胜率/排行/进阶/章节/解锁` 等出现在 **query** 时才覆盖模糊实体候选；实体名后面的方面词（“史莱姆 伤害”）仍走实体候选，避免把怪物问题路由到机制页。
+- `GUIDE_TERMS` 同时作为中文→英文兜底映射：伤害→combat、稀有度→rarity、商店→shop、金币→gold、地图→map、精英→elites、补丁/更新→patch、胜率/排行/Tier→tier、解锁→unlock、升级→upgrade。
+- `sts2_chinese_sources` 默认开启；`sts2_chinese_timeout_seconds` 默认 20 秒。关闭后只使用 Spire Codex 英文攻略/机制。
+
+## 杀戮尖塔2 对比方案 D（2026-10-30）
+
+- B 层默认不调用模型：`SpireCodexService.compare()` 先分别精确搜索两个条目，类型不同返回 `compare_unsupported`，任一边歧义/未命中返回 `compare_unavailable`，都交给 `format_compare()` 给出分开查询提示。
+- 只比较 card/card、relic/relic、character/character；卡牌维度是类型/稀有度/费用/目标/角色/关键词/伤害/格挡/效果/升级后，遗物是稀有度/池/价格/效果/风味，角色是初始生命/金币/能量/球槽/初始遗物/解锁。
+- 社区数据：卡牌/遗物读 `/api/runs/scores/{cards|relics}`，角色读 `/api/runs/community-stats` 的 `by_character`；读取失败只省略社区行，不影响字段对比。
+- C 层只在问题含“为什么/怎么选/适合/值得/推荐/理由”时调用模型，prompt 要求只使用给出的字段和效果、不编造联动/数值、最多 200 字；模型失败保留 B 层结果并记 fallback。
+- `A10和N10` 归一后相同，助手直接回答“同一条目/等级”，不调用 compare；STS2 的“有什么区别”走对比，其他游戏仍保留原分开查询提示。
+- `wiki_compare` 工具目前只支持 `game=sts2`，参数 `query_a/query_b/question/game`；框架契约检查已通过 4.5.7 与 4.29.3。
+
+## 杀戮尖塔2 进度/Meta 查询（2026-10-30）
+
+- 新增 `ascension/act/achievement/unlock` 四类：进阶按 `level` 精确匹配，章节按“第X章/幕/精英/BOSS”触发，成就返回全部成就列表，解锁按 `/api/unlocks` 分类展平后按角色名匹配。
+- `_meta_result` 只在没有精确实体时运行；`第一章有什么精英` 需要同时出现章节词与精英/BOSS/幕，避免裸“荣耀/密林”被误判成章节。
+- 解锁/成就列表的完整信息同时放进 `基本信息`，因为裸名称查询的 evidence 默认只取第一段；`解锁条件` 仍保留为独立分节供追问。
+- `wiki_read` 的 `page_id` 对 `achievement=ALL` 和 `unlock` 做特殊解析；`unlock` 链接指向 `/zhs/timeline`，其余进阶/章节/成就使用实体页。
+- 本轮仍复用 `SpireCodexService` 的 `Section/evidence` 契约，没有新增工具；`wiki_compare` 与 `wiki_search/read` 继续并行。
+
+## 杀戮尖塔2 事件社区选择（2026-10-30）
+
+- 事件页在问题含“选哪个/怎么选/选择/选项/社区选择”时读取 `/api/runs/community-stats` 的 `events`，按事件 ID 匹配选项 ID，输出社区选择占比。
+- 选项中文名先取顶层 `options`，再 `setdefault` 合并 `pages[].options`；深渊浴场的 LINGER/EXIT_BATHS 只在分支页出现，不能只读顶层。
+- 只展示选择占比，不推断“最优”；固定附“共 N 次选择，占比仅供参考”。`data_through` 可作为后续统一口径字段。
+- `选哪个/怎么选/社区选择` 的 specifics 必须排在“选项”之前，否则会被更宽的“选项”先命中。
+
+## 杀戮尖塔2 剧情/纪元与商店（2026-10-30）
+
+- 剧情：`story` 实体来自 `/api/stories`，`_story_sections` 用 `epochs` 关联 `/api/epochs`；裸“剧情/故事”返回全部故事线，角色名+剧情返回该角色故事，具体故事标题直接命中。
+- 纪元：`epoch` 实体来自 `/api/epochs`，展示名称/时代/年份/解锁方式/故事；`解锁内容` 关联卡牌、遗物、药水 ID；`_url` 统一指向 `/zhs/timeline`。
+- 商店：`/api/merchant/config` 是单对象，`_detail("merchant", "MERCHANT")` 特殊读取；按删牌、卡牌、遗物、药水、假商人分节；稀有度英文键用 `RARITY_NAMES` 转中文。
+- `_names` 对空 ID 列表直接返回，避免为无解锁内容的纪元请求卡牌/药水全表。
+- 文本字段统一过 `clean()`，避免 `[red]` 等游戏 BBCode 进入回答。
+
+## 杀戮尖塔2 社区统计与覆盖率审计（2026-10-30）
+
+- `community` 合成实体覆盖：致命遭遇（`deaths.encounters`）、先古选取（`ancient_picks`）、篝火选择（`rest_sites`）、最常删除（`most_removed`）、奖励跳过率（`reward_skip_rate`）；`_meta_result` 用“致命/容易死/篝火/删什么/先古祝福/跳过奖励”触发。
+- 统计名称优先用实体索引解析中文：致命遭遇查 encounter，先Ancient查 relic，最常删除查 card；解析不到时回退 stats 里的英文 name。篝火 label 用 `REST_NAMES` 映射，未知标签保留原文。
+- 中文攻略源只处理构筑/路线/商店/新手/进阶/先古等主题；补丁、Tier、稀有度、解锁等改走 Spire Codex 专属英文页，避免模糊中文攻略抢占。
+- `scripts/audit_sts2_queries.py` 固定 37 条用户问法，覆盖实体、方面、中文源、Meta、事件、社区统计与对比；`--strict` 默认 80% 阈值，当前 37/37。已加入 CI drift 并输出 `research/sts2-coverage.json`。
+- 中文源首次抓取大页面可能较慢；`_chinese_timeout` 调整为 `min(20, timeout*0.8)`，超时仍回退英文。
+
+## 杀戮尖塔2 对比与先古补强（2026-10-30）
+
+- 同名限定：`打击（铁甲战士）/打击·铁甲战士` 先按限定词拆分，再在候选标签中过滤；`树叶史莱姆（中）` 的括号是实体名，限定词不在角色/类型白名单时不拆。`compare()` 复用 `search()`，因此同名卡比较可直接带角色限定。
+- 跨类型对比不再只给链接：`compare_unsupported` 会附两边效果摘要，仍不判断“谁更强”。
+- C 层模型结论先过 `clean_overview`：正文中的数字必须出现在对比结果 JSON 里，否则丢弃模型段落并记 fallback，只保留 B 层数据。
+- 先古：`先古之民有哪些` 返回先古列表；`先古祝福怎么选` 走社区选取统计；`ancient-pools` 详情仍按实体读取，前端链接统一 `/zhs/ancients`。
+- CI 稳定性：中文源在云端可能超时，`smoke_sts2.py` 只保留 Spire Codex 稳定用例；`audit_sts2_queries.py` 在 CI 中无 `--strict` 运行并输出报告，本地需要门禁时加 `--strict`。当前诊断 37/39，失败项是中文源超时回退英文的“攻略/机制”。
+
+## 杀戮尖塔2 语言与查询拆分修正（2026-10-30）
+
+- 多语言搜索不能只保留最后一个语言的 `data`：纯中文会依次请求 zhs/zht，若 zht 为空，`data` 会变成空响应，导致 `has_reference` 误判、术语回退失效。必须让 `data` 跟随实际选中的 `items`（`fallback_data`）。
+- 繁体：`_langs` 对 CJK 追加 `zht`；Spire Codex 的 zht 搜索很稀疏，若 zht 无结果而 zhs 只有一个候选且查询含繁体特征字，可把该候选视为精确匹配。`_detail` 仍用 zhs，输出简体正文。
+- 无空格方面词拆分：`_split_aspect` 让 `Bash 效果`、`燃烧之血效果` 在 AI 工具直接调用时也能拆出 query/question；`剧情/故事/机制/攻略/成就/解锁/商店/价格/先古/胜率` 等元/攻略词必须跳过，否则“静默猎手剧情”会被拆成角色名后落到角色页。
+- 同名限定：`_split_qualified` 只在括号/分隔符后的限定词属于角色或类型白名单时拆分，`树叶史莱姆（中）` 这类真实条目名不能被误拆。
+
+## 杀戮尖塔2 扩展社区统计（2026-10-30）
+
+- 新增 `map/survival/behavior/hopper/matrix/records` 六类：地图按幕输出普通/精英/Boss 死亡率，生存曲线取 1/5/10/.../50 层，角色行为显示平均删牌与锻造/休息占比，被偷卡牌解析中文卡名，进阶矩阵按角色列出 A0–A10 胜率，记录显示最快通关/最长一局/最大卡组。
+- `_split_kind_prefix` 现在要求类型词后有空格或分隔符；“角色行为”“遗物效果”不能被当成“角色/遗物 + 实体”拆开，否则会丢掉整词概念。
+- 社区统计的摘要行同时放进 `基本信息`，裸名称查询不会只看到“统计截至”一行。
+
+## 杀戮尖塔2 中文源 429 与图片发送（2026-10-30）
+
+- `ChineseGuideService` 记录按主机冷却：429 时读取 `Retry-After`，在冷却期内直接抛 `httpx.ConnectError`，不再重复打源站；调用方回退 Spire Codex 英文。
+- 新增 webp 发送 wiring 测试：`_send_entry_image(..., convert_webp=True)` 必须把开关传给 `prepared_image`；真实转码本身由 `tests/test_images.py` 覆盖。
+
+## 杀戮尖塔2 中文源条款确认（2026-10-30）
+
+- Spire Codex：`API_TERMS.md` 明确公共 API 免费供社区使用（含商业项目），注明来源“鼓励但不强制”；无 SLA、schema 可能随补丁变化；游戏数据版权归 Mega Crit，禁止用数据重编译/重打包/再分发游戏。现有使用方式符合。
+- STS2.INFO：未找到 terms/privacy/license 页面；robots `Allow: /` 并提供 sitemap；页脚声明“粉丝攻略站，所有游戏内容版权归 MegaCrit 所有，数据来源 Spire Codex”。没有对编辑正文的再分发授权。
+- STS2FRONT：未找到 terms/privacy/contact 页面；robots `Allow: /` 并提供 sitemap；页面声明内容来自 Mega Crit 官方发布、游戏内数据和社区报告，同样没有明确的正文再分发授权。
+- 结论：抓取技术上被 robots 允许，但正文没有显式授权。当前只做按需抓取、短节选（`EXCERPT_CHARS=2500`）、来源标注和原文链接，不镜像、不打包全文；`sts2_chinese_sources=false` 可完全回退 Spire Codex 英文。若插件进行商业分发或大规模运营，应先联系站点运营方取得授权。
+- 测试 fixture 只使用合成 HTML 片段，不把 STS2.INFO/STS2FRONT 整页纳入仓库或安装包。
+
+## 杀戮尖塔2 用户问法补强（2026-10-30）
+
+- 角色页：问题含“剧情/故事”时关联 `/api/stories` 与 `/api/epochs` 追加“故事线”；问题含“胜率”且带 `A10/进阶N/难度N` 时读 `ascension_matrix` 追加“进阶胜率”。
+- 章节页：普通怪问法映射到“普通遭遇”，不再只列 BOSS/精英/事件；`_act_sections` 过滤 `room_type == Monster`。
+- 商店“买什么/买啥/价格/多少钱”在精确实体之前优先走 merchant 配置，避免被术语“商店”截走。
+- 解锁总览：`遗物/卡牌/角色/药水 + 怎么解锁` 在精确实体前走 `/api/unlocks` 分类列表；`unlock` 的 `ALL_*` page_id 由 `_detail` 特殊还原。
+- 具体成就名（如“完美牌组 怎么完成”）在 `/api/achievements` 中精确匹配，不再要求问题里出现“成就”二字。
+- `适合/值得/值不值` 纳入卡牌/遗物社区分节触发词；`_split_kind_prefix` 要求分隔符，`角色行为`/`遗物效果` 不再被拆。
+- 遭遇候选标签加“遭遇 ·”，与同名怪物候选区分。
+
+## 杀戮尖塔2 列表/排行与 Boss 打法（2026-10-30）
+
+- 列表/排行是合成 kind `list`：`PATHS` 末尾追加 `"list": "lists"`（追加在末尾，已有 KIND_CODES 与历史 page_id 不变）；`_detail("list", key)` 按 key 还原，key 形如 `RELICS_POOL_IRONCLAD`、`CARDS_COLOR_IRONCLAD_RARITY_RARE_TYPE_ATTACK`、`RANK_CARDS_COLOR_SILENT`，全大写、值段不含下划线。`_read` 在 `_known` 丢失（进程重启）时用 `_list_keys()` 枚举闭集重新哈希还原，不依赖不存在的 /api/lists。
+- 列表直接用 API 过滤参数：`/api/cards?color=&rarity=&type=`、`/api/relics?pool=`（rarity/type 用英文 key：Basic/Common/Uncommon/Rare/Ancient 与 Attack/Skill/Power，带 lang=zhs）。排行数据来自 `/api/runs/scores/{cards|relics}`（win_rate 已是百分数），角色胜率来自 community-stats 的 `by_character`；排行数据失败时降级为普通列表并注明“暂无社区对局数据”。
+- `_list_intent` 在 `_search` 里、多语言搜索之前执行，命中即整题走列表。守卫：文本含“删”（社区统计）或 卡组/牌组/牌堆（初始卡组问法）不进列表；裸“胜率排行”保留攻略路径（既有 audit 用例），泛化 Tier 需 表/榜/当前/版本/中文/Tier 等话题词；角色+胜率+A10 仍走进阶胜率分支。“这张牌胜率多少”因无角色且无话题词保持实体问法。
+- 裸名称列表查询会把 question 设为分节名（遗物列表/卡牌列表/胜率排行），让 evidence 命中列表分节；列表分节首几行同时放进 `基本信息`，与解锁/成就总览同一模式。跨角色列表每行带角色标签，五张“打击”可区分；单角色列表带费用/稀有度标签。
+- Boss 打法：`_monster_tactics` 只用 moves/attack_pattern/innate_powers 生成（最高伤害招式、首回合招式、随机/条件出招、固有能力、进阶生命），没有逐 Boss 社区攻略数据，不编造。注意 act.bosses 的 ID 是 `{NAME}_BOSS`（遭遇 ID），怪物索引是 `{NAME}`；`_boss_tactics` 依次尝试原 ID、归一化、去 `_BOSS` 后缀。
+- 进阶解锁规则文本（ASCENSION_RULES）是本适配器的编辑性总结，Spire Codex 无该页面；“进阶怎么解锁”合成 `ascension/UNLOCK` 实体，链接 /zhs/unlocks。实测澄清：进阶/成就实体页链接并非 404——正确路由是 /zhs/ascensions/level_10 与 /zhs/achievements/all_cards_upgraded（API id `LEVEL_10`/`ALL_CARDS_UPGRADED` 经 `.lower()` 后正好命中）；此前记录的 404 是探测时手拼了 `/ascensions/10`、`/achievements/all-cards-upgraded` 这类错误形态。
+- “卡牌/遗物/药水怎么获得”走对应机制页（card-rarity/relic-distribution/potion-drop-rates），英文正文由概览模型总结；specifics 的 获取/获得 行目标改为元组（正文/摘要/基本信息），实体页无正文分节时行为不变。
+- STS2 intents/specifics 新增：排行→胜率排行、有哪些/哪些/列表/遗物池→列表分节、怎么打/打法/应对→打法要点/BOSS应对。打法行必须排在 BOSS 行之前，否则“Boss怎么应对”先命中纯名单；“怎么打/打法/应对”因此成为全局方面词，其他游戏“X怎么打”也会拆成实体+方面（行为正确）。
+- 怪物 min/max_hp 的进阶上限可能为 null，显示统一用 `or '?'` 兜底，避免“399–None”。
+- 验证：pytest 422 passed；Ruff format/check 通过；framework 4.5.7/4.29.3 通过；package 35 files/11,142,278 bytes；smoke_sts2 30/30；audit 63/65（未过项为中文源超时回退英文的“攻略/机制”，与既有诊断一致）。未改版本号。
+
+## 杀戮尖塔2 中文攻略源修复（2026-10-30）
+
+- 根因实测：`sts2.info/zh/guides`（攻略列表页）对 Python httpx 的 TLS 指纹**确定性 503**（curl 同 UA 200、浏览器 UA 被拖挂超时、httpx 恒 503），`/zh/mechanics` 与 STS2FRONT 全部 200 正常。历史上“攻略/机制”两条 audit 用例间歇失败，主要就是该页被 WAF 指纹拦截，而非网络慢或 UA 被拒。
+- 修复：`ChineseGuideService.guide()` 改为两级列表源——STS2.INFO 可达时仍优先（既有测试路径不变），列表请求失败或无命中时回退 STS2FRONT 的 `/zh-cn/tips/` 索引（中文攻略：Boss 打法、商店/篝火策略、Tier、解锁等），文章页沿用 `_parse_sts2front_page`。tips 的 key 是 `cn:guide:sts2front:tips:{slug}`，`read()`/`url()` 按最长前缀先匹配；`_entry` 的来源标签因前缀包含 `cn:guide:sts2front:` 自动落到“杀戮尖塔2 STS2FRONT”。列表解析抽成 `_parse_link_list(html, prefix, origin)` 共用，URL 保留源站原始斜杠形态。
+- 重试策略：中文源 5xx 只重试一次（WAF 拦截不会在 0.5 秒内消失，尽快落到下一来源）；超时/网络错误重试三次。429 行为不变（按 Retry-After 冷却）。
+- 排序同义扩展：用户问“攻略”，STS2FRONT tips 标题多用“指南/打法/路线”，`_ranked_guide` 按 `GUIDE_SYNONYMS` 扩展查询词后再打分，否则中文命中恒为空。
+- 挂起防护：STS2.INFO 的 `/zh/guides` 还有第三种形态——既不 503 也不响应（tarpit）。`guide()` 给第一个源的列表请求单独设 `min(4, timeout/4)` 秒上限（可达时实测 ≈0.3s），超时即切 STS2FRONT，避免耗尽整个中文超时预算；离线测试 `test_guide_sts2info_tarpit_falls_back_to_tips` 用异步 handler 模拟挂起。
+- `scripts/audit_sts2_queries.py` 改用持久缓存 `research/sts2-cache/`（research/ 已整体 gitignore）：中文大页面冷抓偶发触发限流会读成假覆盖失败，缓存后本地复跑稳定；CI drift 每次仍冷跑、保持诊断性质。smoke 维持临时目录（全部为 Spire Codex 稳定用例）。
+- 澄清记录：进阶/成就实体页链接从未损坏（`/zhs/ascensions/level_10`、`/zhs/achievements/all_cards_upgraded` 均 200），此前“404”是探测时手拼错误 URL 形态所致；`_url` 的 `.lower()` 恰好生成正确路由，无需改动。
+- 验证：pytest 425 passed；Ruff 通过；冷缓存与热缓存 audit 均 **65/65**；smoke 30/30。未改版本号。
+
+## 杀戮尖塔2 系统级问法补全（2026-10-30）
+
+- 按「用户会在 wiki 搜什么」逐类验证后补齐系统级/概述型问题，全部走既有机制页与列表机器，无新数据源：
+  - `分数怎么算`、`每日挑战`、`问号房有什么` → CONCEPT_MECHANICS 直连机制页 slug（score-formula / unknown-rooms；地图生成、篝火选项同理）。daily 没有独立页，score-formula 正文含每日榜单。
+  - `苦痛/充能球/关键词/附魔/事件有哪些` → `_list_intent` 新增 REFERENCE_LIST_KINDS，合成 list kind 走 `_reference_list_sections`（`_index(kind,"zhs")` 整表，行格式 `名称：描述前60字`）。key 为 RELICS/AFFLICTIONS/ORBS/KEYWORDS/ENCHANTMENTS/EVENTS。
+  - `联机/多人/合作怎么玩`、`卡组推荐`、`附魔怎么选` → CHINESE_GUIDE_WORDS 加 附魔/联机/多人/合作，GUIDE_TOPICS 加 组合/选牌/开荒/时间线 等，GUIDE_SYNONYMS 加 卡组↔构筑/组合/选牌、联机↔合作/多人/单人；tips 标题「先玩单人还是合作」「最强卡牌组合」「附魔怎么选」得以命中。
+  - `诅咒是什么` 等释义问法在 `_search` 归一后剥「是什么意思/是什么」后缀（剩余 ≥2 字才剥），裸词走 term_exact 候选。
+  - `BOSS遗物有哪些` → `_list_intent` note 模式（RELICS_NOTE_BOSS），给「STS2 不设 Boss 遗物分类 + 稀有度分布计数」，不再误导性返回全量遗物。注意括号：`kind=="relic" and ("boss" in text.lower() or "首领" in text)`，先前漏括号会让裸「首领」误触发。
+- 附魔类概念问法必须同时在 CONCEPT_WORDS（拦截 /api/search 描述命中带来的无关遗物候选）与 CHINESE_GUIDE_WORDS（放行中文攻略尝试），缺一个就会退回噪声候选或 not_found。
+- 验证：pytest 432 passed；Ruff 通过；framework 4.5.7/4.29.3 通过；package 35 files/11,149,065 bytes；smoke 33/33；audit 75/75（含全部新增系统级问法）。未改版本号。

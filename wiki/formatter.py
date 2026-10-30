@@ -10,6 +10,71 @@ def source_links(result: dict) -> list[str]:
     return list(dict.fromkeys([u for u in urls if u] or [result["url"]]))[:2]
 
 
+def _compare_metrics_text(metrics: dict) -> str:
+    parts = []
+    if metrics.get("win_rate") is not None:
+        parts.append(f"胜率 {metrics['win_rate']}%")
+    if metrics.get("share") is not None:
+        parts.append(f"占比 {metrics['share']}%")
+    if metrics.get("picks") is not None:
+        parts.append(f"选取 {metrics['picks']} 次")
+    if metrics.get("runs") is not None:
+        parts.append(f"{metrics['runs']} 局")
+    if metrics.get("score") is not None:
+        parts.append(f"评分 {metrics['score']}")
+    return "，".join(parts)
+
+
+def format_compare(result: dict) -> str:
+    """Render the deterministic B-layer comparison; C narrative is appended by the caller."""
+    status = result.get("status")
+    if status == "compare":
+        left, right = result.get("left", {}), result.get("right", {})
+        lines = [f"【对比】{left.get('title')} vs {right.get('title')}", ""]
+        for dimension in result.get("dimensions", []):
+            lines.append(
+                f"{dimension['label']}：{dimension['left']} ｜ {dimension['right']}"
+            )
+        left_metrics = _compare_metrics_text(left.get("metrics") or {})
+        right_metrics = _compare_metrics_text(right.get("metrics") or {})
+        if left_metrics or right_metrics:
+            lines.append("")
+            lines.append(
+                f"社区数据：{left.get('title')} {left_metrics or '—'}；{right.get('title')} {right_metrics or '—'}"
+            )
+        lines.append("")
+        lines.append("来源：\n" + "\n".join(result.get("source_urls", [])))
+        return "\n".join(lines)
+    if status == "compare_unsupported":
+        left, right = result.get("left", {}), result.get("right", {})
+
+        def line(side):
+            title = side.get("title", "")
+            summary = side.get("summary")
+            if summary:
+                return f"{title}：{summary}\n{side.get('url', '')}"
+            return f"{title}：{side.get('url', '')}"
+
+        return (
+            f"{result.get('message', '这两个条目不能直接比较。')}\n\n"
+            f"{line(left)}\n\n{line(right)}"
+        )
+    if status == "compare_unavailable":
+        left, right = result.get("left", {}), result.get("right", {})
+        queries = [
+            item.get("query")
+            for item in (left, right)
+            if isinstance(item, dict) and item.get("query")
+        ]
+        suffix = ""
+        if len(queries) == 2:
+            suffix = "\n\n请分开查询：" + "、".join(
+                f"/sts2 {query}" for query in queries
+            )
+        return result.get("message", "对比失败，请先分别确认条目名称。") + suffix
+    return result.get("message", "对比失败。")
+
+
 def format_command(
     result: dict, limit=1200, brief=350, detailed=750, excerpt_label=False
 ):
@@ -30,10 +95,11 @@ def format_command(
             )
             for index, item in enumerate(result["candidates"][:5], 1)
         )
-        reply = (
+        intro = result.get("choice_intro") or (
             f"没有与「{query}」同名的条目，以下是搜索到的相关条目，"
-            "请确认后使用完整名称重新查询：\n\n" + choices
+            "请确认后使用完整名称重新查询："
         )
+        reply = intro + "\n\n" + choices
         if result.get("suggestion_used"):
             reply += (
                 f"\n\n已尝试纠错关键词「{result['suggestion_used']}」，请确认目标条目。"

@@ -12,11 +12,11 @@ from wiki.models import Section, page_url
 from wiki.query import QueryService
 
 
-def test_profiles_cover_five_games_with_unique_commands():
-    assert set(PROFILES) == {"ys", "sr", "zzz", "arknights", "zmd"}
+def test_profiles_cover_six_games_with_unique_commands():
+    assert set(PROFILES) == {"ys", "sr", "zzz", "arknights", "zmd", "sts2"}
     commands = [p.command for p in PROFILES.values()]
     assert len(commands) == len(set(commands))
-    assert commands == ["ys", "sr", "zzz", "ark", "zmd"]
+    assert commands == ["ys", "sr", "zzz", "ark", "zmd", "sts2"]
     assert all(not profile.aliases for profile in PROFILES.values())
     assert YS.card_words, "only the Genshin profile routes card lookups"
     for code, profile in PROFILES.items():
@@ -766,3 +766,25 @@ def test_equipment_questions_route_to_real_guide_sections():
             )
             assert [s["section"] for s in snippets][:1] == [expected], question
             assert meta["mode"] != "fallback", question
+
+
+def test_sts2_ascension_and_upgrade_slang():
+    """A/N/难度/双Boss 与敲牌黑话必须归一，进阶之灾保持卡牌名。"""
+    from wiki.games import normalize_slang
+
+    cases = (
+        ("A10双Boss怎么打", "进阶10怎么打"),
+        ("n10胜率", "进阶10胜率"),
+        ("难度10怎么解锁", "进阶10怎么解锁"),
+        ("进阶十怎么解锁", "进阶10怎么解锁"),
+        ("A0怎么开", "进阶0怎么开"),
+        ("双Boss是什么", "进阶10是什么"),
+        ("进阶之灾怎么删", "进阶之灾怎么删"),
+        ("进阶9和进阶10区别", "进阶9和进阶10区别"),
+        ("打击敲了效果", "打击升级了效果"),
+        ("敲位不够", "升级优先级不够"),
+        ("火堆敲牌还是睡觉", "升级还是休息"),
+        ("锻造和睡觉", "升级和休息"),
+    )
+    for raw, expected in cases:
+        assert normalize_slang(raw, PROFILES["sts2"]) == expected, raw

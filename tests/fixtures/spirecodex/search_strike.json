@@ -1,0 +1,90 @@
+{
+ "query": "打击",
+ "categories": [
+  {
+   "label": "Cards",
+   "kind": "card",
+   "items": [
+    {
+     "name": "打击",
+     "path": "/cards/strike_ironclad",
+     "subtitle": "ironclad · 攻击 · 基础"
+    },
+    {
+     "name": "打击",
+     "path": "/cards/strike_silent",
+     "subtitle": "silent · 攻击 · 基础"
+    },
+    {
+     "name": "打击",
+     "path": "/cards/strike_regent",
+     "subtitle": "regent · 攻击 · 基础"
+    },
+    {
+     "name": "打击",
+     "path": "/cards/strike_necrobinder",
+     "subtitle": "necrobinder · 攻击 · 基础"
+    },
+    {
+     "name": "打击",
+     "path": "/cards/strike_defect",
+     "subtitle": "defect · 攻击 · 基础"
+    }
+   ]
+  },
+  {
+   "label": "Relics",
+   "kind": "relic",
+   "items": [
+    {
+     "name": "打击木偶",
+     "path": "/relics/strike_dummy",
+     "subtitle": "普通遗物 · shared"
+    },
+    {
+     "name": "打击木偶？？？",
+     "path": "/relics/fake_strike_dummy",
+     "subtitle": "事件遗物 · shared"
+    },
+    {
+     "name": "幽灵种子",
+     "path": "/relics/ghost_seed",
+     "subtitle": "商店遗物 · shared"
+    },
+    {
+     "name": "潘多拉魔盒",
+     "path": "/relics/pandoras_box",
+     "subtitle": "先古遗物 · shared"
+    },
+    {
+     "name": "营养汤",
+     "path": "/relics/nutritious_soup",
+     "subtitle": "先古遗物 · shared"
+    }
+   ]
+  },
+  {
+   "label": "Powers",
+   "kind": "power",
+   "items": [
+    {
+     "name": "地狱狂徒",
+     "path": "/powers/hellraiser",
+     "subtitle": "Buff · Single"
+    }
+   ]
+  },
+  {
+   "label": "Potions",
+   "kind": "potion",
+   "items": [
+    {
+     "name": "士兵炖汤",
+     "path": "/potions/soldiers_stew",
+     "subtitle": "稀有"
+    }
+   ]
+  }
+ ],
+ "engine": "index"
+}

@@ -37,9 +37,12 @@ class WikiClient:
         self.game = game
         self.game_name = PROFILES[game].name
         self.source = source or default_source(game)
-        self.source_name = {"prts": "PRTS", "bwiki": "BWIKI", "akedata": "AKEData"}.get(
-            self.source, self.source
-        )
+        self.source_name = {
+            "prts": "PRTS",
+            "bwiki": "BWIKI",
+            "akedata": "AKEData",
+            "spirecodex": "Spire Codex",
+        }.get(self.source, self.source)
         self.api = source_api(game, self.source)
         self._host = httpx.URL(self.api).host
         self.http = httpx.AsyncClient(
@@ -86,15 +89,28 @@ class WikiClient:
         await asyncio.gather(*tasks, return_exceptions=True)
         await self.http.aclose()
 
+    def _cache_key(self, params: dict) -> str:
+        # The game code prefixes the key so two wikis never share an entry.
+        prefix = self.game if self.source == "bwiki" else f"{self.source}:{self.game}"
+        return hashlib.sha256(
+            (prefix + json.dumps(params, sort_keys=True, ensure_ascii=False)).encode()
+        ).hexdigest()
+
     async def request(self, params: dict, ttl: float) -> dict:
         params = {**params, "format": "json", "formatversion": 2}
-        # The game code prefixes the key so two wikis never share an entry.
-        key = hashlib.sha256(
-            (
-                (self.game if self.source == "bwiki" else f"{self.source}:{self.game}")
-                + json.dumps(params, sort_keys=True, ensure_ascii=False)
-            ).encode()
-        ).hexdigest()
+        return await self._request_cached(params, ttl)
+
+    async def get(self, path: str, params: dict, ttl: float):
+        """GET a non-MediaWiki JSON endpoint through the same cache/coalescing.
+
+        Spire Codex and similar REST sources need their own URL and query
+        shape; keeping this beside ``request`` means they still share pacing,
+        retry, 429 backoff and the SQLite cache.
+        """
+        return await self._request_cached({"path": path, **params}, ttl)
+
+    async def _request_cached(self, params: dict, ttl: float):
+        key = self._cache_key(params)
         cached = await self.cache.get(key)
         if cached is not None:
             self._counters["cache_hits"] += 1
@@ -138,9 +154,13 @@ class WikiClient:
         except WikiError as exc:
             self._count_error(exc.code)
             raise
-        empty = result.get("query", {}).get("search") == []
+        empty = self._is_empty(result)
         await self.cache.put(key, result, min(ttl, 60) if empty else ttl)
         return result
+
+    def _is_empty(self, result) -> bool:
+        """MediaWiki reports no hits in query.search; REST sources override."""
+        return isinstance(result, dict) and result.get("query", {}).get("search") == []
 
     async def _wait_turn(self):
         async with self._pace:
@@ -195,6 +215,8 @@ class WikiClient:
                 raise WikiError(
                     "forbidden", f"{self.source_name} 拒绝了本次访问，请稍后重试。"
                 )
+            if response.status_code == 404:
+                raise WikiError("not_found", f"{self.source_name} 未找到该条目。")
             if response.status_code == 429:
                 delay = self._retry_after(response.headers.get("Retry-After", "30"))
                 WikiClient._blocked[self._host] = time.monotonic() + delay
@@ -219,6 +241,13 @@ class WikiClient:
             raise WikiError(
                 "invalid_response", f"{self.source_name} 返回了非 JSON 内容。"
             ) from None
+        result = self._validate_payload(result)
+        if isinstance(result, dict):
+            result["_fetched_at"] = datetime.now(timezone.utc).isoformat()
+        return result
+
+    def _validate_payload(self, result):
+        """Accept a source-specific JSON shape; MediaWiki requires an object."""
         if not isinstance(result, dict):
             raise WikiError(
                 "invalid_response", f"{self.source_name} 返回的数据格式异常。"
@@ -228,5 +257,4 @@ class WikiClient:
             if code in {"missingtitle", "nosuchpageid", "invalidpageid"}:
                 raise WikiError("not_found", f"未找到该{self.game_name}词条。")
             raise WikiError("api_error", f"{self.source_name} 暂时无法读取该词条。")
-        result["_fetched_at"] = datetime.now(timezone.utc).isoformat()
         return result

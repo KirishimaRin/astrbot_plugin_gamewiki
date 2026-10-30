@@ -38,6 +38,38 @@ def test_invalid_portrait_is_rejected():
         _resize(b"not an image")
 
 
+def test_spire_codex_webp_is_converted_and_cached(tmp_path):
+    from wiki.cache import Cache
+
+    source = io.BytesIO()
+    Image.new("RGB", (40, 20), (200, 30, 20)).save(source, format="WEBP")
+    body = _resize(source.getvalue())
+    with Image.open(io.BytesIO(body)) as converted:
+        assert converted.format == "JPEG"
+
+    async def run():
+        cache = Cache(tmp_path)
+        url = "https://cdn.spire-codex.com/cards-full/stable/test.webp"
+        with patch("wiki.images._download", AsyncMock(return_value=body)) as download:
+            async with prepared_image(url, cache, convert_webp=True) as path:
+                assert Path(path).suffix == ".jpg"
+                with Image.open(path) as image:
+                    assert image.format == "JPEG"
+                    assert image.size == (40, 20)
+            download.assert_awaited_once_with(url)
+            with patch("wiki.images._download", AsyncMock()) as second:
+                async with prepared_image(url, cache, convert_webp=True) as path:
+                    assert Path(path).is_file()
+                second.assert_not_awaited()
+            with patch("wiki.images._download", AsyncMock()) as third:
+                async with prepared_image(url) as path:
+                    assert path == url
+                third.assert_not_awaited()
+            await cache.clear()
+
+    asyncio.run(run())
+
+
 def test_compressed_image_cache_and_failed_send_cleanup(tmp_path):
     from wiki.cache import Cache
 

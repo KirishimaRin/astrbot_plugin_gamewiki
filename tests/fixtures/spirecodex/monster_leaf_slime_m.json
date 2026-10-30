@@ -1,0 +1,98 @@
+{
+ "id": "LEAF_SLIME_M",
+ "name": "树叶史莱姆（中）",
+ "type": "Normal",
+ "min_hp": 32,
+ "max_hp": 35,
+ "min_hp_ascension": 33,
+ "max_hp_ascension": 36,
+ "moves": [
+  {
+   "id": "CLUMP_SHOT",
+   "name": "团块射击",
+   "intent": "Attack",
+   "damage": {
+    "normal": 8,
+    "ascension": 9,
+    "hit_count": null
+   },
+   "block": null,
+   "heal": null,
+   "powers": null
+  },
+  {
+   "id": "STICKY_SHOT",
+   "name": "黏糊射击",
+   "intent": "Status",
+   "damage": null,
+   "block": null,
+   "heal": null,
+   "powers": null
+  }
+ ],
+ "damage_values": {
+  "Clump": {
+   "normal": 8,
+   "ascension": 9,
+   "hit_count": null
+  }
+ },
+ "block_values": null,
+ "encounters": [
+  {
+   "encounter_id": "FLYCONID_NORMAL",
+   "encounter_name": "真菌与史莱姆",
+   "room_type": "Monster",
+   "act": "Act 1 - Overgrowth",
+   "is_weak": false
+  },
+  {
+   "encounter_id": "SLIMES_NORMAL",
+   "encounter_name": "一大群史莱姆",
+   "room_type": "Monster",
+   "act": "Act 1 - Overgrowth",
+   "is_weak": false
+  },
+  {
+   "encounter_id": "SLIMES_WEAK",
+   "encounter_name": "一群史莱姆",
+   "room_type": "Monster",
+   "act": "Act 1 - Overgrowth",
+   "is_weak": true
+  },
+  {
+   "encounter_id": "SLITHERING_STRANGLER_NORMAL",
+   "encounter_name": "扼杀者与伙伴",
+   "room_type": "Monster",
+   "act": "Act 1 - Overgrowth",
+   "is_weak": false
+  }
+ ],
+ "innate_powers": null,
+ "attack_pattern": {
+  "type": "cycle",
+  "initial_move": null,
+  "states": [
+   {
+    "id": "CLUMP_SHOT",
+    "type": "move",
+    "move_id": "CLUMP_SHOT",
+    "must_perform_once": null,
+    "next": null,
+    "branches": null
+   },
+   {
+    "id": "STICKY_SHOT",
+    "type": "move",
+    "move_id": "STICKY_SHOT",
+    "must_perform_once": null,
+    "next": null,
+    "branches": null
+   }
+  ],
+  "description": ""
+ },
+ "quotes": null,
+ "image_url": "/static/images/monsters/leaf_slime_m.webp",
+ "beta_image_url": null
+}

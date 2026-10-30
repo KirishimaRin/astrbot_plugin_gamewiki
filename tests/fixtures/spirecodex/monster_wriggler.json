@@ -1,0 +1,144 @@
+{
+ "id": "WRIGGLER",
+ "name": "扭动虫",
+ "type": "Elite",
+ "min_hp": 17,
+ "max_hp": 21,
+ "min_hp_ascension": 18,
+ "max_hp_ascension": 22,
+ "moves": [
+  {
+   "id": "NASTY_BITE",
+   "name": "污秽啃咬",
+   "intent": "Attack",
+   "damage": {
+    "normal": 6,
+    "ascension": 7,
+    "hit_count": null
+   },
+   "block": null,
+   "heal": null,
+   "powers": null
+  },
+  {
+   "id": "WRIGGLE",
+   "name": "扭动",
+   "intent": "Buff + Status",
+   "damage": null,
+   "block": null,
+   "heal": null,
+   "powers": [
+    {
+     "power_id": "STRENGTH",
+     "target": "self",
+     "amount": 2
+    }
+   ]
+  },
+  {
+   "id": "SPAWNED",
+   "name": "生成",
+   "intent": "Stun",
+   "damage": null,
+   "block": null,
+   "heal": null,
+   "powers": null
+  }
+ ],
+ "damage_values": {
+  "Bite": {
+   "normal": 6,
+   "ascension": 7,
+   "hit_count": null
+  }
+ },
+ "block_values": null,
+ "encounters": [
+  {
+   "encounter_id": "DENSE_VEGETATION_EVENT_ENCOUNTER",
+   "encounter_name": "扭动虫",
+   "room_type": "Monster",
+   "act": null,
+   "is_weak": false
+  },
+  {
+   "encounter_id": "PHROG_PARASITE_ELITE",
+   "encounter_name": "异蛙寄生虫",
+   "room_type": "Elite",
+   "act": "Act 1 - Overgrowth",
+   "is_weak": false
+  }
+ ],
+ "innate_powers": null,
+ "attack_pattern": {
+  "type": "conditional",
+  "initial_move": null,
+  "states": [
+   {
+    "id": "NASTY_BITE_MOVE",
+    "type": "move",
+    "move_id": "NASTY_BITE",
+    "must_perform_once": null,
+    "next": "WRIGGLE_MOVE",
+    "branches": null
+   },
+   {
+    "id": "WRIGGLE_MOVE",
+    "type": "move",
+    "move_id": "WRIGGLE",
+    "must_perform_once": null,
+    "next": "NASTY_BITE_MOVE",
+    "branches": null
+   },
+   {
+    "id": "SPAWNED_MOVE",
+    "type": "move",
+    "move_id": "SPAWNED",
+    "must_perform_once": null,
+    "next": "INIT_MOVE",
+    "branches": null
+   },
+   {
+    "id": "INIT_MOVE",
+    "type": "conditional",
+    "move_id": null,
+    "must_perform_once": null,
+    "next": null,
+    "branches": [
+     {
+      "move_id": "NASTY_BITE",
+      "weight": null,
+      "repeat": null,
+      "max_times": null,
+      "condition": "base.Creature.SlotName == \"wriggler1\""
+     },
+     {
+      "move_id": "WRIGGLE",
+      "weight": null,
+      "repeat": null,
+      "max_times": null,
+      "condition": "base.Creature.SlotName == \"wriggler2\""
+     },
+     {
+      "move_id": "NASTY_BITE",
+      "weight": null,
+      "repeat": null,
+      "max_times": null,
+      "condition": "base.Creature.SlotName == \"wriggler3\""
+     },
+     {
+      "move_id": "WRIGGLE",
+      "weight": null,
+      "repeat": null,
+      "max_times": null,
+      "condition": "base.Creature.SlotName == \"wriggler4\""
+     }
+    ]
+   }
+  ],
+  "description": ""
+ },
+ "quotes": null,
+ "image_url": "/static/images/monsters/wriggler.webp",
+ "beta_image_url": null
+}

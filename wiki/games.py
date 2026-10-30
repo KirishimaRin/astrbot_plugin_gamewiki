@@ -415,6 +415,132 @@ ZMD = GameProfile(
     accent=(196, 148, 38),
 )
 
+STS2 = GameProfile(
+    code="sts2",
+    name="杀戮尖塔2",
+    command="sts2",
+    # Spire Codex 的实体不是角色/武器，而是卡牌、遗物、药水、怪物、事件和
+    # 角色。分节名由 SpireCodexService 生成，intents 只负责把问题词映射到
+    # 这些分节；不要在这里放“生命”“角色”这类容易出现在条目名里的单字。
+    intents=(
+        (("费用", "耗能", "能量", "星费"), ("基本信息",), ()),
+        (("伤害", "格挡", "抽牌", "数值", "倍率"), ("数值", "效果"), ()),
+        (("效果", "作用", "干嘛", "做什么"), ("效果",), ()),
+        (("升级", "强化"), ("升级后",), ()),
+        (("招式", "意图", "技能"), ("招式",), ()),
+        # 打法问法要排在 Boss 词之前，否则“Boss怎么应对”会先命中纯名单。
+        (("怎么打", "打法", "应对", "对策", "打不过"), ("打法要点", "BOSS应对"), ()),
+        (("出招", "顺序", "循环", "攻击模式"), ("出招顺序",), ()),
+        (("出现", "遭遇", "哪个幕", "幕"), ("出现遭遇", "基本信息"), ()),
+        (
+            ("选项", "选择", "选哪个", "怎么选", "前置", "条件", "社区选择"),
+            ("选项", "社区选择", "基本信息"),
+            (),
+        ),
+        (("分支", "后续", "其他选项", "会怎样", "继续"), ("分支",), ()),
+        (
+            ("搭配", "配对", "配合", "推荐", "选哪", "选哪张", "胜率", "强度", "评分"),
+            ("搭配", "推荐", "胜率"),
+            (),
+        ),
+        (("攻略", "指南"), ("基本信息", "摘要", "正文", "攻略"), ()),
+        (("卡组", "流派", "怎么玩", "玩法"), ("基本信息", "攻略", "正文"), ()),
+        (("机制", "规则", "概率"), ("基本信息", "摘要", "正文"), ()),
+        (("进阶",), ("基本信息", "效果", "社区胜率"), ()),
+        (("成就",), ("基本信息", "成就列表", "条件"), ()),
+        (("解锁",), ("解锁条件", "基本信息"), ()),
+        (
+            (
+                "BOSS",
+                "boss",
+                "精英",
+                "第一章",
+                "第一幕",
+                "第二章",
+                "第二幕",
+                "第三章",
+                "第三幕",
+                "第四章",
+                "第四幕",
+            ),
+            ("基本信息", "BOSS", "精英", "普通遭遇", "事件"),
+            (),
+        ),
+        (("初始", "起始", "开局"), ("基本信息", "初始遗物", "初始卡组"), ()),
+        (("解锁",), ("解锁条件", "解锁规则", "基本信息"), ()),
+        # 获取/获得问法在机制页要给到正文；实体页没有正文分节，仍落基本信息。
+        (("获取", "获得", "来源"), ("正文", "摘要", "基本信息"), ()),
+        (("血量", "生命值", "HP", "hp"), ("基本信息",), ()),
+        (("稀有度", "类型", "关键词"), ("基本信息",), ()),
+        # 列表/排行分节由 SpireCodexService 生成（卡牌列表/遗物列表/胜率排行）。
+        (("排行", "排名", "梯度", "Tier", "强度榜"), ("胜率排行",), ()),
+        (
+            ("有哪些", "哪些", "列表", "遗物池"),
+            ("卡牌列表", "遗物列表", "药水列表"),
+            (),
+        ),
+    ),
+    specifics=(
+        (("费用", "耗能", "能量"), "基本信息"),
+        (("伤害", "格挡", "抽牌", "数值"), "数值"),
+        (("升级", "强化"), "升级后"),
+        (("招式", "意图", "技能"), "招式"),
+        (("出招", "顺序", "循环", "攻击模式"), "出招顺序"),
+        (("出现", "遭遇", "幕"), "出现遭遇"),
+        # 放在“选项”之前：问“其他选项”时不能先被更宽的“选项”命中。
+        (("分支", "后续", "其他选项", "会怎样"), "分支"),
+        (("搭配", "配对", "配合"), "搭配"),
+        (("推荐", "选哪", "选哪张"), "推荐"),
+        (("胜率", "强度", "评分"), "胜率"),
+        (("攻略", "指南"), ("正文", "攻略")),
+        (("卡组", "流派", "怎么玩", "玩法"), ("攻略", "正文")),
+        (("机制", "规则", "概率"), "正文"),
+        (("成就",), "成就列表"),
+        (("解锁",), "解锁条件"),
+        # 打法映射要排在 BOSS/精英 之前，否则“Boss怎么应对”只给名单。
+        (
+            ("怎么打", "打法", "应对", "对策", "打不过", "怎么对付"),
+            ("打法要点", "BOSS应对"),
+        ),
+        (("BOSS", "boss"), "BOSS"),
+        (("精英",), "精英"),
+        (("普通怪", "小怪", "普通遭遇"), "普通遭遇"),
+        (("选哪个", "怎么选", "社区选择"), "社区选择"),
+        (("选项", "选择"), "选项"),
+        (("前置", "条件"), "基本信息"),
+        (("初始", "起始", "开局"), ("基本信息", "初始遗物", "初始卡组")),
+        (("解锁",), "解锁条件"),
+        (("获取", "获得", "来源"), ("正文", "摘要", "基本信息")),
+        (("血量", "生命值", "HP", "hp"), "基本信息"),
+        (("稀有度", "类型", "关键词"), "基本信息"),
+        (("效果", "作用"), "效果"),
+        # 列表/排行分节：排到最后，避免抢占“选项有哪些”等既有问法。
+        (("排行", "排名", "梯度", "Tier", "强度榜"), "胜率排行"),
+        (("有哪些", "哪些", "列表", "遗物池"), ("卡牌列表", "遗物列表", "药水列表")),
+    ),
+    slang=(
+        # 火堆升级的黑话；长词必须排在单字“敲”之前。
+        ("火堆敲牌", "升级"),
+        ("敲牌", "升级"),
+        ("锻造", "升级"),
+        ("敲位", "升级优先级"),
+        ("敲", "升级"),
+        ("睡觉", "休息"),
+    ),
+    # 这些是精确昵称，不走 normalize_slang 的子串替换，避免“铁甲战士”
+    # 被“战士”二次改写。
+    site_aliases={
+        "战士": "铁甲战士",
+        "铁甲": "铁甲战士",
+        "猎人": "静默猎手",
+        "机器人": "故障机器人",
+        "死灵": "亡灵契约师",
+        "死灵法师": "亡灵契约师",
+        "摄政王": "储君",
+    },
+    accent=(170, 52, 44),
+)
+
 # Aspect words shared by every game. The question splitter in assistant.py
 # builds its vocabulary from here plus the per-game intents, so a new aspect
 # word teaches intent parsing for all games at once and cannot drift from
@@ -456,7 +582,7 @@ GENERIC_ASPECTS = (
     "年龄",
 )
 
-PROFILES = {p.code: p for p in (YS, SR, ZZZ, ARKNIGHTS, ZMD)}
+PROFILES = {p.code: p for p in (YS, SR, ZZZ, ARKNIGHTS, ZMD, STS2)}
 
 # Game-name heads users prepend ("原神纳西妲是谁"); they are context, never
 # the entity, so local parsing peels them before splitting a question.
@@ -466,6 +592,7 @@ GAME_WORDS = {
     "zzz": ("绝区零",),
     "arknights": ("明日方舟", "方舟"),
     "zmd": ("明日方舟:终末地", "明日方舟", "终末地"),
+    "sts2": ("杀戮尖塔2", "尖塔2", "STS2", "sts2", "杀戮尖塔"),
 }
 
 
@@ -488,6 +615,42 @@ def _rewrite_positioned(text: str, pattern: re.Pattern, new: str) -> str:
     return "".join(pieces)
 
 
+_CN_ASCENSION = {
+    "一": 1,
+    "二": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+    "十": 10,
+}
+# A10 / N10 / 难度10 都指进阶等级；N 是中文社区“难度”的首字母。
+_ASCENSION_TOKEN = re.compile(r"(?<![A-Za-z0-9])(?:[AaNn]|难度)\s*([0-9]{1,2})(?!\d)")
+_ASCENSION_CN = re.compile(r"进阶\s*([0-9]{1,2}|[一二三四五六七八九十])")
+_DOUBLE_BOSS = re.compile(r"双\s*(?:boss|Boss|BOSS|首领)")
+
+
+def _normalize_sts2_ascension(text: str) -> str:
+    """Map community ascension spellings to 进阶N; keep 进阶之灾 untouched."""
+
+    def replace(match):
+        raw = match.group(1)
+        level = _CN_ASCENSION.get(raw, int(raw) if raw.isdigit() else None)
+        if level is None or not 0 <= level <= 10:
+            return match.group(0)
+        return f"进阶{level}"
+
+    text = _ASCENSION_TOKEN.sub(replace, text)
+    text = _ASCENSION_CN.sub(replace, text)
+    if _DOUBLE_BOSS.search(text):
+        # “A10双Boss”已经带等级，去掉重复描述；“双Boss”单独出现时补 A10。
+        text = _DOUBLE_BOSS.sub("" if "进阶10" in text else "进阶10", text)
+    return text
+
+
 def normalize_slang(text: str, profile: GameProfile) -> str:
     """Rewrite fixed colloquialisms so existing vocabulary and mappings apply.
 
@@ -506,6 +669,8 @@ def normalize_slang(text: str, profile: GameProfile) -> str:
     plus = PLUS_TARGETS.get(profile.code)
     if plus:
         text = _rewrite_positioned(text, PLUS_SHORTHAND, plus)
+    if profile.code == "sts2":
+        text = _normalize_sts2_ascension(text)
     return text
 
 
@@ -528,6 +693,8 @@ def api_url(code: str) -> str:
 
 
 def default_source(code: str) -> str:
+    if code == "sts2":
+        return "spirecodex"
     return "prts" if code == "arknights" else "bwiki"
 
 
@@ -536,6 +703,8 @@ def source_api(code: str, source: str) -> str:
         return "https://data.akedata.wiki/manifest.json"
     if source == "prts" and code == "arknights":
         return "https://prts.wiki/api.php"
+    if source == "spirecodex" and code == "sts2":
+        return "https://spire-codex.com"
     if source == "bwiki" and code in PROFILES:
         return f"https://wiki.biligame.com/{code}/api.php"
     raise ValueError("Unsupported wiki source")

@@ -10,7 +10,7 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 
-from .formatter import format_command, source_links
+from .formatter import format_command, format_compare, source_links
 from .games import COMPARE_JOIN, aspect_words, game_words, normalize_slang
 from .models import WikiError
 
@@ -31,6 +31,8 @@ COMPARE_TAIL = re.compile(
     r"(?:哪个|谁|哪位)(?:更)?(?:好|强|厉害|值得|优先)|谁更强|怎么选|选哪个"
     r"|(?:练|抽|培养)谁|先(?:练|抽)(?:哪个|谁)"
 )
+# STS2 允许“A和B有什么区别”直接进入对比；其他游戏保留原有路由。
+COMPARE_DIFF = re.compile(r"(?:有什么)?(?:区别|不同|差异)")
 # A position-split query may keep one dangling verb ("纳西妲用").
 TRAILING_VERBS = "用带配打玩选买换"
 # 等级/评价类尾巴不属于实体："胡桃90级面板""胡桃10级E伤害"
@@ -118,6 +120,22 @@ def fallback_intent(text: str, aliases=(), game_words: tuple = ()) -> tuple[str,
         query = _strip_trailing_modifiers(query)
         return query or stripped, text
     return _strip_trailing_modifiers(stripped) or stripped, text
+
+
+def compare_entities(text: str, *, allow_equal=False):
+    """Return two entity names from a comparison question, or None."""
+    match = COMPARE_TAIL.search(text) or COMPARE_DIFF.search(text)
+    head = text[: match.start()] if match else text
+    parts = [part.strip("的 ，,：:") for part in COMPARE_JOIN.split(head)]
+    parts = [part for part in parts if part]
+    if (
+        len(parts) == 2
+        and (allow_equal or parts[0] != parts[1])
+        and not COMPARE_JOIN.match(head)
+        and all(len(part) <= 30 for part in parts)
+    ):
+        return parts
+    return None
 
 
 def compare_reply(text: str, profile) -> str:
@@ -264,7 +282,75 @@ class CommandAssistant:
             finally:
                 metrics["model_seconds"] += time.monotonic() - before
 
-        if page_id is None and COMPARE_TAIL.search(text) and COMPARE_JOIN.search(text):
+        diff_compare = profile.code == "sts2" and bool(COMPARE_DIFF.search(text))
+        if (
+            page_id is None
+            and (COMPARE_TAIL.search(text) or diff_compare)
+            and COMPARE_JOIN.search(text)
+        ):
+            parts = compare_entities(text, allow_equal=True)
+            if parts and parts[0] == parts[1]:
+                if profile.code == "sts2":
+                    return f"这两个说法指同一条目/等级：{parts[0]}。", {
+                        "model_calls": 0,
+                        "model_seconds": 0.0,
+                        "fallback": False,
+                        "outcome": "comparison",
+                        "total_seconds": time.monotonic() - started,
+                    }
+                parts = None
+            compare = getattr(service, "compare", None)
+            result = None
+            if parts and compare is not None:
+                try:
+                    result = await compare(parts[0], parts[1], text)
+                except WikiError:
+                    result = None
+            if result is not None and result.get("status") == "compare":
+                reply = format_compare(result)
+                if any(
+                    word in text
+                    for word in ("为什么", "怎么选", "适合", "值得", "推荐", "理由")
+                ):
+                    prompt = (
+                        "依据下方对比数据用中文回答用户问题，只使用给出的字段和效果，"
+                        "不要编造联动、数值或未给出的机制；资料不足时明确说明。"
+                        "给出条件性建议，不超过200字；只输出正文。\n"
+                        + json.dumps(result, ensure_ascii=False)
+                    )
+                    try:
+                        body = (await generate(prompt)).strip()
+                        body = clean_overview(
+                            body,
+                            400,
+                            [
+                                {
+                                    "text": json.dumps(result, ensure_ascii=False),
+                                    "section": "对比",
+                                }
+                            ],
+                        )
+                    except Exception:
+                        body = ""
+                        metrics["fallback"] = True
+                    if body:
+                        reply += "\n\n" + body
+                metrics.update(
+                    outcome="comparison",
+                    total_seconds=time.monotonic() - started,
+                )
+                return reply, metrics
+            if result is not None and result.get("status") in {
+                "compare_unsupported",
+                "compare_unavailable",
+            }:
+                return format_compare(result), {
+                    "model_calls": 0,
+                    "model_seconds": 0.0,
+                    "fallback": False,
+                    "outcome": "comparison",
+                    "total_seconds": time.monotonic() - started,
+                }
             return compare_reply(text, profile), {
                 "model_calls": 0,
                 "model_seconds": 0.0,
