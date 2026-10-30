@@ -304,6 +304,21 @@ SEARCH = {
             }
         ],
     },
+    "燃燒之血": {
+        "query": "燃燒之血",
+        "categories": [
+            {
+                "kind": "relic",
+                "items": [
+                    {
+                        "name": "燃燒之血",
+                        "path": "/relics/burning_blood",
+                        "subtitle": "初始遺物 · ironclad",
+                    }
+                ],
+            }
+        ],
+    },
     "红头骨": {
         "query": "红头骨",
         "categories": [
@@ -460,8 +475,12 @@ def make_service(tmp_path, calls=None):
         if path == "/api/search":
             q, lang = params.get("q"), params.get("lang")
             payload = SEARCH.get(q)
+            if q == "燃燒之血":
+                if lang == "zhs":
+                    return httpx.Response(200, json=SEARCH["燃烧之血"])
+                return httpx.Response(200, json={"query": q, "categories": []})
             if payload is not None and (
-                lang == "zhs" or q in {"Bash", "guide", "mechanics"}
+                lang == "zhs" or q in {"Bash", "guide", "mechanics", "燃燒之血"}
             ):
                 return httpx.Response(200, json=payload)
             return httpx.Response(200, json={"query": q, "categories": []})
@@ -1170,3 +1189,31 @@ def test_ancient_list_meta(tmp_path):
     assert result["title"] == "先古之民"
     assert "先古列表" in result["available_sections"]
     assert "Darv" in "\n".join(item["text"] for item in result["evidence"])
+
+
+def test_traditional_chinese_falls_back_to_zht(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            return await service.search("燃燒之血", "")
+        finally:
+            await client.close()
+
+    result = asyncio.run(run())
+    assert result["status"] == "ok"
+    assert result["title"] == "燃烧之血"
+
+
+def test_mixed_language_query_splits_trailing_aspect(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            return await service.search("Bash 效果", "")
+        finally:
+            await client.close()
+
+    result = asyncio.run(run())
+    assert result["status"] == "ok"
+    assert result["title"] == "重击"

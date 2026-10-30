@@ -145,7 +145,7 @@
 - 搜索会命中描述且同名实体多：`search` 必须精确名称优先；同名候选带角色/类型标签，并设置 `choice_intro`，不能沿用“没有同名条目”的默认文案。
 - BBCode：`clean()` 把 `[energy:N]` 转 `N费`、空强调对 `[blue][/blue]` 转 `X`；能力 `description` 可能丢数值，`effect_text` 先 `description` 后 `description_raw`。不要把 `[gold]` 等标签原样送进卡片或模型。
 - `_tool_read` 对 sts2 单独处理：source 留空或 `spirecodex`；不要走 `read_from_source`（它只认 bwiki 且会拒绝其他游戏）。
-- 验证：`pytest -q` 400 passed；Ruff 通过；framework 4.5.7/4.29.3 通过；package 35 files/11,129,245 bytes；Spire Codex 冒烟 23/23；覆盖率审计诊断 37/39（中文源超时回退英文），本地 `--strict` 阈值 80% 通过。
+- 验证：`pytest -q` 402 passed；Ruff 通过；framework 4.5.7/4.29.3 通过；package 35 files/11,130,568 bytes；Spire Codex 冒烟 25/25；覆盖率审计诊断 39/41（仅“攻略/机制”因中文源超时回退英文），本地 `--strict` 阈值 80% 通过。
 - 尚无备用源；Spire Codex 故障时只能明确报错。未改版本号。
 
 ## 杀戮尖塔2 计划内增强（2026-10-30）
@@ -221,3 +221,10 @@
 - C 层模型结论先过 `clean_overview`：正文中的数字必须出现在对比结果 JSON 里，否则丢弃模型段落并记 fallback，只保留 B 层数据。
 - 先古：`先古之民有哪些` 返回先古列表；`先古祝福怎么选` 走社区选取统计；`ancient-pools` 详情仍按实体读取，前端链接统一 `/zhs/ancients`。
 - CI 稳定性：中文源在云端可能超时，`smoke_sts2.py` 只保留 Spire Codex 稳定用例；`audit_sts2_queries.py` 在 CI 中无 `--strict` 运行并输出报告，本地需要门禁时加 `--strict`。当前诊断 37/39，失败项是中文源超时回退英文的“攻略/机制”。
+
+## 杀戮尖塔2 语言与查询拆分修正（2026-10-30）
+
+- 多语言搜索不能只保留最后一个语言的 `data`：纯中文会依次请求 zhs/zht，若 zht 为空，`data` 会变成空响应，导致 `has_reference` 误判、术语回退失效。必须让 `data` 跟随实际选中的 `items`（`fallback_data`）。
+- 繁体：`_langs` 对 CJK 追加 `zht`；Spire Codex 的 zht 搜索很稀疏，若 zht 无结果而 zhs 只有一个候选且查询含繁体特征字，可把该候选视为精确匹配。`_detail` 仍用 zhs，输出简体正文。
+- 无空格方面词拆分：`_split_aspect` 让 `Bash 效果`、`燃烧之血效果` 在 AI 工具直接调用时也能拆出 query/question；`剧情/故事/机制/攻略/成就/解锁/商店/价格/先古/胜率` 等元/攻略词必须跳过，否则“静默猎手剧情”会被拆成角色名后落到角色页。
+- 同名限定：`_split_qualified` 只在括号/分隔符后的限定词属于角色或类型白名单时拆分，`树叶史莱姆（中）` 这类真实条目名不能被误拆。

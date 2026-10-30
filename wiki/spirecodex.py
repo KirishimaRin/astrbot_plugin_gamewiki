@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 import httpx
 
 from .client import WikiClient
-from .games import STS2, normalize_slang
+from .games import STS2, aspect_words, normalize_slang
 from .models import Section, WikiError
 from .selection import evidence
 
@@ -295,6 +295,9 @@ PLACEHOLDER = re.compile(r"\{[^{}]{1,80}\}")
 TITLE_TRIM = re.compile(r"[\s。！？～，、；：…（）()\[\]【】「」『』\"'”’]+$")
 CJK = re.compile(r"[一-鿿]")
 QUALIFIED_QUERY = re.compile(r"^(.+?)\s*[（(·|｜]\s*([^）)]+?)\s*[）)]?$")
+TRADITIONAL_HINTS = frozenset(
+    "燒遺藥戰劍擊傷靈體護費點數質態勢斬殺獵機幣價寶傳說圖鑑覺醒選擇條件獲得來開關鎖進階難雙領獎勵跳過統計紀劇"
+)
 QUALIFIER_WORDS = {
     *CHARACTERS.values(),
     *CHARACTERS.keys(),
@@ -888,16 +891,28 @@ class SpireCodexService:
         query = normalize_slang(query, self.profile)
         query, prefix_kind = self._split_kind_prefix(query)
         query, qualifier = self._split_qualified(query)
+        if not question:
+            query, question = self._split_aspect(query)
         normalized = self.aliases.get(query, query)
         data = None
         items = []
+        wanted = name_key(normalized)
+        fallback_items = []
+        fallback_data = None
         for lang in self._langs(normalized):
             data = await self.client.get(
                 "/api/search", {"q": normalized, "lang": lang}, self.search_ttl
             )
-            items = self._items(data)
-            if items:
+            current = self._items(data)
+            if current and not fallback_items:
+                fallback_items = current
+                fallback_data = data
+            if any(name_key(item["name"]) == wanted for item in current):
+                items = current
                 break
+        if not items:
+            items = fallback_items
+            data = fallback_data
         base = {
             "query": original,
             "normalized_query": normalized,
@@ -905,8 +920,15 @@ class SpireCodexService:
             "game": "sts2",
             "data_version": version,
         }
-        wanted = name_key(normalized)
         exact = [item for item in items if name_key(item["name"]) == wanted]
+        if (
+            not exact
+            and len(items) == 1
+            and any(char in TRADITIONAL_HINTS for char in query)
+        ):
+            # Spire Codex's zht search is sparse; a traditional query often
+            # returns one simplified candidate. Treat that as the match.
+            exact = items
         if qualifier and exact:
             exact = [item for item in exact if qualifier in self._label(item)]
         hint = prefix_kind or self._kind_hint(question)
@@ -1001,6 +1023,49 @@ class SpireCodexService:
         return name, qualifier
 
     @staticmethod
+    def _split_aspect(query):
+        """Split a trailing aspect word when no question was supplied.
+
+        The command path normally supplies query/question separately; this
+        helps direct AI-tool calls such as “Bash 效果” or “燃烧之血效果”.
+        """
+        if len(query) <= 2:
+            return query, ""
+        for word in aspect_words():
+            if word in {
+                "有哪些",
+                "哪些",
+                "什么",
+                "剧情",
+                "故事",
+                "故事线",
+                "纪元",
+                "时间线",
+                "机制",
+                "规则",
+                "攻略",
+                "指南",
+                "成就",
+                "解锁",
+                "商店",
+                "价格",
+                "删牌",
+                "先古",
+                "祝福",
+                "胜率",
+                "排行",
+                "Tier",
+                "补丁",
+                "更新",
+            }:
+                continue
+            if len(query) > len(word) and query.endswith(word):
+                prefix = query[: -len(word)].rstrip(" 的")
+                if len(prefix) >= 2:
+                    return prefix, word
+        return query, ""
+
+    @staticmethod
     def _split_kind_prefix(query):
         for word, kind in KIND_WORDS:
             if query.startswith(word) and len(query) > len(word):
@@ -1013,12 +1078,13 @@ class SpireCodexService:
     def _langs(text):
         langs = []
         if CJK.search(text):
-            langs.append("zhs")
+            # zht is a fallback for traditional-Chinese names; the entity ID
+            # is shared, so read still returns the simplified payload.
+            langs.extend(("zhs", "zht"))
         if re.search(r"[A-Za-z]", text):
             langs.append("eng")
         if not langs:
             langs = ["zhs"]
-        # Pure English still tries Chinese; pure Chinese does not fan out.
         if langs == ["eng"]:
             langs.append("zhs")
         return tuple(dict.fromkeys(langs))
@@ -2224,14 +2290,14 @@ class SpireCodexService:
                 if isinstance(item, dict)
             ]
             names = await self._names("encounter", [item.get("id") for item in rows])
-            add(
-                "致命遭遇",
-                [
-                    f"{names[index] if names[index] != item.get('id') else item.get('name')}"
-                    f"：{item.get('pct')}%"
-                    for index, item in enumerate(rows)
-                ],
-            )
+            lines = []
+            for index, item in enumerate(rows):
+                name = (
+                    names[index] if names[index] != item.get("id") else item.get("name")
+                )
+                lines.append(f"{name}：{item.get('pct')}%")
+            add("基本信息", lines[:3])
+            add("致命遭遇", lines)
         elif metric == "ancient":
             rows = [
                 item
@@ -2239,25 +2305,26 @@ class SpireCodexService:
                 if isinstance(item, dict)
             ]
             names = await self._names("relic", [item.get("id") for item in rows])
-            add(
-                "先古选取",
-                [
-                    f"{names[index] if names[index] != item.get('id') else item.get('name')}"
-                    f"：选取率 {item.get('take_rate')}%，占比 {item.get('pct')}%"
-                    for index, item in enumerate(rows)
-                ],
-            )
+            lines = []
+            for index, item in enumerate(rows):
+                name = (
+                    names[index] if names[index] != item.get("id") else item.get("name")
+                )
+                lines.append(
+                    f"{name}：选取率 {item.get('take_rate')}%，占比 {item.get('pct')}%"
+                )
+            add("基本信息", lines[:3])
+            add("先古选取", lines)
         elif metric == "rest":
             rows = data.get("rest_sites") or []
-            add(
-                "篝火选择",
-                [
-                    f"{REST_NAMES.get(item.get('label'), item.get('label'))}："
-                    f"选择 {item.get('pct')}%，胜率 {item.get('win_rate')}%"
-                    for item in rows
-                    if isinstance(item, dict)
-                ],
-            )
+            lines = [
+                f"{REST_NAMES.get(item.get('label'), item.get('label'))}："
+                f"选择 {item.get('pct')}%，胜率 {item.get('win_rate')}%"
+                for item in rows
+                if isinstance(item, dict)
+            ]
+            add("基本信息", lines[:3])
+            add("篝火选择", lines)
         elif metric == "removed":
             rows = [
                 item
@@ -2276,6 +2343,7 @@ class SpireCodexService:
         elif metric == "skip":
             rate = data.get("reward_skip_rate")
             if rate is not None:
+                add("基本信息", [f"跳过奖励比例：{rate}%"])
                 add("奖励跳过率", [f"跳过奖励比例：{rate}%"])
 
     def _guide_sections(self, entity, add):
