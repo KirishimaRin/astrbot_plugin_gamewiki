@@ -292,3 +292,12 @@
   - `BOSS遗物有哪些` → `_list_intent` note 模式（RELICS_NOTE_BOSS），给「STS2 不设 Boss 遗物分类 + 稀有度分布计数」，不再误导性返回全量遗物。注意括号：`kind=="relic" and ("boss" in text.lower() or "首领" in text)`，先前漏括号会让裸「首领」误触发。
 - 附魔类概念问法必须同时在 CONCEPT_WORDS（拦截 /api/search 描述命中带来的无关遗物候选）与 CHINESE_GUIDE_WORDS（放行中文攻略尝试），缺一个就会退回噪声候选或 not_found。
 - 验证：pytest 432 passed；Ruff 通过；framework 4.5.7/4.29.3 通过；package 35 files/11,149,065 bytes；smoke 33/33；audit 75/75（含全部新增系统级问法）。未改版本号。
+
+## v0.4.0 版本（杀戮尖塔2接入与文档整理）
+
+- VERSION、metadata、README 与 CHANGELOG 同步为 v0.4.0。
+- 合并杀戮尖塔2特性分支（PR #2），新增第六款游戏支持——杀戮尖塔2（`sts2`，命令 `/sts2`）。
+- 接入 Spire Codex REST API 及 STS2.INFO / STS2FRONT 双级中文攻略兜底。
+- 新增大模型对比工具 `wiki_compare` 及同名消歧与社区胜率数据支持。
+- 全量整理 README、CHANGELOG 与 ROADMAP 文档，保持无 emoji、自然客观的技术风格。
+

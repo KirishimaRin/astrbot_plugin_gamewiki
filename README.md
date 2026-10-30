@@ -4,7 +4,7 @@
 
 查询原神、崩坏：星穹铁道、绝区零、明日方舟、明日方舟：终末地与杀戮尖塔2的角色、卡牌、遗物、技能、材料、配装、卡池和任务资料。支持命令查询与大模型工具调用，向用户返回中文概览、证据卡片与来源链接。明日方舟优先 PRTS，终末地优先 AKEData，杀戮尖塔2使用 Spire Codex，其余三款游戏使用 BWIKI。所有公开维基查询均直接调取公开接口，无需 API Key、UID 或游戏账号凭据。
 
-当前版本：**v0.3.1**；作者：**KirishimaRin**；插件标识：`astrbot_plugin_gamewiki`。持续改进计划见 [ROADMAP](docs/ROADMAP.md)。
+当前版本：**v0.4.0**；作者：**KirishimaRin**；插件标识：`astrbot_plugin_gamewiki`。持续改进计划见 [ROADMAP](docs/ROADMAP.md)。
 
 ---
 
@@ -141,7 +141,28 @@ https://github.com/KirishimaRin/astrbot_plugin_gamewiki
 | `genshin_wiki_search` | `query`、`question` | （兼容旧版）原神专属搜索，等价于 `game=ys` |
 | `genshin_wiki_read` | `page_id`、`section`、`question` | （兼容旧版）原神专属补读 |
 
+`query` 填写条目名称或简短关键词，`question` 填写完整问题，`game` 填写游戏代码（`ys` / `sr` / `zzz` / `arknights` / `zmd` / `sts2`）。
+
+**数据源选择（source 参数）**：
+- 明日方舟：填写 `prts`（优先）或 `bwiki`；
+- 终末地：填写 `akedata`（优先）或 `bwiki`；
+- 杀戮尖塔2：可留空或填写 `spirecodex`；
+- 原神、星铁、绝区零：留空即可。
+
+**条目对比（wiki_compare）**：
+- 目前支持杀戮尖塔2（`game="sts2"`）同类型条目（如两张卡牌、两件遗物、两个角色）的字段属性与社区胜率对比，支持「打击（铁甲战士）」等同名限定格式。
+
 AI 工具路径全面接入黑话归一化逻辑，大模型对话中调用工具同样支持「平A」「0命」「专武」「UP池」等表述转换。
+
+自然语言调用示例：
+- “查一下草神突破需要哪些材料，附来源。”
+- “流萤的星魂有哪些效果？”
+- “能天使专三材料要哪些？”
+- “现在UP什么？”
+- “杀戮尖塔2 燃烧之血有什么效果？”
+- “铁甲战士所有稀有攻击牌有哪些？”
+- “打击（铁甲战士）和打击（静默猎手）有什么区别？”
+- “知识恶魔怎么打？”
 
 ---
 
