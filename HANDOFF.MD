@@ -145,7 +145,7 @@
 - 搜索会命中描述且同名实体多：`search` 必须精确名称优先；同名候选带角色/类型标签，并设置 `choice_intro`，不能沿用“没有同名条目”的默认文案。
 - BBCode：`clean()` 把 `[energy:N]` 转 `N费`、空强调对 `[blue][/blue]` 转 `X`；能力 `description` 可能丢数值，`effect_text` 先 `description` 后 `description_raw`。不要把 `[gold]` 等标签原样送进卡片或模型。
 - `_tool_read` 对 sts2 单独处理：source 留空或 `spirecodex`；不要走 `read_from_source`（它只认 bwiki 且会拒绝其他游戏）。
-- 验证：`pytest -q` 374 passed；Ruff 通过；framework 4.5.7/4.29.3 通过；package 34 files/11,108,997 bytes；真实 API 冒烟覆盖遗物、同名卡、怪物、事件分支、角色初始卡组、出招顺序、能力、术语、充能球、搭配、胜率、攻略与机制。
+- 验证：`pytest -q` 382 passed；Ruff 通过；framework 4.5.7/4.29.3 通过；package 35 files/11,117,165 bytes；真实 API 冒烟覆盖遗物、同名卡、怪物、事件分支、角色初始卡组、出招顺序、能力、术语、充能球、搭配、胜率、攻略、机制与中文攻击/伤害/进阶查询。
 - 尚无备用源；Spire Codex 故障时只能明确报错。未改版本号。
 
 ## 杀戮尖塔2 计划内增强（2026-10-30）
@@ -162,3 +162,14 @@
 - 攻略/机制：`/api/search` 的 guide/mechanics 标题是英文，中文问题词（攻略/机制/规则/概率/BOSS/流派/卡组）先映射到英文关键词再搜；机械页面的搜索路径是 `/mechanics/{slug}`，API 详情是 `/api/mechanics/sections/{slug}`，两者不能共用一个 PATH。列表项用 `slug` 而不是 `id`，`_index`/`_detail` 统一补 `id` 后再算 page_id。
 - 攻略/机制正文是英文 markdown，`_markdown_text` 只做标题/链接/粗体/行内代码的扁平化；概览模型负责中文总结。不要把英文正文直接当作中文答案。
 - 仍未做：备用数据源、完整平台 webp 发送验收。
+
+## 杀戮尖塔2 黑话与中文编辑源（2026-10-30）
+
+- 进阶黑话：`A10/a10/N10/n10/难度10/进阶十` 统一为 `进阶10`；`A0/N0` 为 `进阶0`；`双Boss/双首领` 为 `进阶10`，已有 `进阶10` 时去掉重复描述。`进阶之灾` 不带数字，必须保持卡牌名，不能归一成进阶5。
+- 升级黑话：`火堆敲牌/敲牌/锻造/敲` → `升级`，`敲位` → `升级优先级`，`睡觉` → `休息`。长词必须排在单字“敲”之前；已核对 Spire Codex 实体名不含“敲/锻造/难度/敲位”，单字替换不会误伤条目。
+- 服务层 `_search` 也会对 query 调用 `normalize_slang`，因为 AI 工具可能直接把 `A10`/`敲牌` 当 query 传入；命令路径仍先归一整段输入。
+- 中文源：STS2.INFO 的 `/zh/mechanics` 按 `article` 卡片（状态名 + 效果/叠加/克制/协同）与 `h2` 分节解析；`/zh/guides` 列表按 `a[href^="/zh/guides/"]` 解析。STS2FRONT 仅在角色攻略缺失时兜底，读取 `/zh-cn/characters/{id}/` 的 `section`，过滤导航/来源/模板段落。
+- 中文源 HTML 较大（机制页约 440 KB、攻略列表约 350 KB），必须缓存 6 小时；`_chinese_timeout` 只给可选源 `min(8, timeout/2)` 秒，超时后回退 Spire Codex 英文，不能让中文源拖垮整个查询。
+- 概念路由：`伤害/易伤/格挡/商店/金币/稀有度/地图/精英/补丁/更新/胜率/排行/进阶/章节/解锁` 等出现在 **query** 时才覆盖模糊实体候选；实体名后面的方面词（“史莱姆 伤害”）仍走实体候选，避免把怪物问题路由到机制页。
+- `GUIDE_TERMS` 同时作为中文→英文兜底映射：伤害→combat、稀有度→rarity、商店→shop、金币→gold、地图→map、精英→elites、补丁/更新→patch、胜率/排行/Tier→tier、解锁→unlock、升级→upgrade。
+- `sts2_chinese_sources` 默认开启；`sts2_chinese_timeout_seconds` 默认 20 秒。关闭后只使用 Spire Codex 英文攻略/机制。

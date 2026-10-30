@@ -200,6 +200,20 @@ def test_sts2_command_and_tool_use_the_real_service(plugin):
     asyncio.run(check())
 
 
+def test_sts2_chinese_sources_can_be_disabled(plugin):
+    instance, _, _ = plugin
+    enabled = type(instance)(object(), {"games": ["sts2"]})
+    disabled = type(instance)(
+        object(), {"games": ["sts2"], "sts2_chinese_sources": False}
+    )
+    try:
+        assert enabled.services["sts2"].chinese is not None
+        assert disabled.services["sts2"].chinese is None
+    finally:
+        asyncio.run(enabled.terminate())
+        asyncio.run(disabled.terminate())
+
+
 def test_sts2_custom_base_is_passed_to_client_and_service(plugin):
     instance, _, _ = plugin
     configured = type(instance)(

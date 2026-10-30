@@ -24,6 +24,7 @@ from .wiki.query import QueryService
 from .wiki.sources import ArknightsSources, EndfieldSources
 from .wiki.akedata import AkeClient, AkeService
 from .wiki.spirecodex import SpireCodexClient, SpireCodexService
+from .wiki.chineseguides import ChineseGuideService
 
 ADMIN_WORDS = {"stats", "clear-cache", "session", "doctor"}
 # Aligns with the conversation topic lifetime: followups inside one topic
@@ -64,6 +65,8 @@ class GameWiki(Star):
         # 杀戮尖塔2 可切换到自建 Spire Codex 实例；空串使用官方地址。
         self.spire_codex_base = str(config.get("spire_codex_base", "") or "").strip()
         self.spire_codex_cdn = str(config.get("spire_codex_cdn", "") or "").strip()
+        self.sts2_chinese_sources = bool(config.get("sts2_chinese_sources", True))
+        self.sts2_chinese_timeout = number("sts2_chinese_timeout_seconds", 20, 5, 60)
         self.model_fallback_hits = 0
         self.overview_chars = int(number("overview_chars", 250, 150, 500))
         data_root = Path(get_astrbot_data_path()) / "plugin_data"
@@ -93,7 +96,7 @@ class GameWiki(Star):
             str,
             QueryService | ArknightsSources | EndfieldSources | SpireCodexService,
         ] = {}
-        self.clients: list[WikiClient] = []
+        self.clients: list[WikiClient | ChineseGuideService] = []
         self._image_slots = asyncio.Semaphore(2)
         # Sent portraits within one chat, kept until the conversation topic
         # would have expired; restarts reset it.
@@ -157,6 +160,13 @@ class GameWiki(Star):
                     base=self.spire_codex_base,
                 )
                 self.clients.append(client)
+                chinese = None
+                if self.sts2_chinese_sources:
+                    chinese = ChineseGuideService(
+                        cache,
+                        timeout=self.sts2_chinese_timeout,
+                    )
+                    self.clients.append(chinese)
                 self.services[code] = SpireCodexService(
                     client,
                     aliases={**global_aliases, **game_aliases.get(code, {})},
@@ -167,6 +177,7 @@ class GameWiki(Star):
                     max_chars=int(number("max_evidence_chars", 6000, 1000, 8000)),
                     base=self.spire_codex_base,
                     cdn=self.spire_codex_cdn,
+                    chinese=chinese,
                 )
             else:
                 self.services[code] = build_service(code, "bwiki")

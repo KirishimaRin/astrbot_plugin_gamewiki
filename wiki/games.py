@@ -437,7 +437,8 @@ STS2 = GameProfile(
             ("搭配", "推荐", "胜率"),
             (),
         ),
-        (("攻略", "指南"), ("基本信息", "摘要", "正文"), ()),
+        (("攻略", "指南"), ("基本信息", "摘要", "正文", "攻略"), ()),
+        (("卡组", "流派", "怎么玩", "玩法"), ("基本信息", "攻略", "正文"), ()),
         (("机制", "规则", "概率"), ("基本信息", "摘要", "正文"), ()),
         (("初始", "起始", "开局"), ("基本信息", "初始遗物", "初始卡组"), ()),
         (("解锁",), ("解锁条件",), ()),
@@ -457,7 +458,8 @@ STS2 = GameProfile(
         (("搭配", "配对", "配合"), "搭配"),
         (("推荐", "选哪", "选哪张"), "推荐"),
         (("胜率", "强度", "评分"), "胜率"),
-        (("攻略", "指南"), "正文"),
+        (("攻略", "指南"), ("正文", "攻略")),
+        (("卡组", "流派", "怎么玩", "玩法"), ("攻略", "正文")),
         (("机制", "规则", "概率"), "正文"),
         (("选项", "选择"), "选项"),
         (("前置", "条件"), "基本信息"),
@@ -467,6 +469,15 @@ STS2 = GameProfile(
         (("血量", "生命值", "HP", "hp"), "基本信息"),
         (("稀有度", "类型", "关键词"), "基本信息"),
         (("效果", "作用"), "效果"),
+    ),
+    slang=(
+        # 火堆升级的黑话；长词必须排在单字“敲”之前。
+        ("火堆敲牌", "升级"),
+        ("敲牌", "升级"),
+        ("锻造", "升级"),
+        ("敲位", "升级优先级"),
+        ("敲", "升级"),
+        ("睡觉", "休息"),
     ),
     # 这些是精确昵称，不走 normalize_slang 的子串替换，避免“铁甲战士”
     # 被“战士”二次改写。
@@ -556,6 +567,42 @@ def _rewrite_positioned(text: str, pattern: re.Pattern, new: str) -> str:
     return "".join(pieces)
 
 
+_CN_ASCENSION = {
+    "一": 1,
+    "二": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+    "十": 10,
+}
+# A10 / N10 / 难度10 都指进阶等级；N 是中文社区“难度”的首字母。
+_ASCENSION_TOKEN = re.compile(r"(?<![A-Za-z0-9])(?:[AaNn]|难度)\s*([0-9]{1,2})(?!\d)")
+_ASCENSION_CN = re.compile(r"进阶\s*([0-9]{1,2}|[一二三四五六七八九十])")
+_DOUBLE_BOSS = re.compile(r"双\s*(?:boss|Boss|BOSS|首领)")
+
+
+def _normalize_sts2_ascension(text: str) -> str:
+    """Map community ascension spellings to 进阶N; keep 进阶之灾 untouched."""
+
+    def replace(match):
+        raw = match.group(1)
+        level = _CN_ASCENSION.get(raw, int(raw) if raw.isdigit() else None)
+        if level is None or not 0 <= level <= 10:
+            return match.group(0)
+        return f"进阶{level}"
+
+    text = _ASCENSION_TOKEN.sub(replace, text)
+    text = _ASCENSION_CN.sub(replace, text)
+    if _DOUBLE_BOSS.search(text):
+        # “A10双Boss”已经带等级，去掉重复描述；“双Boss”单独出现时补 A10。
+        text = _DOUBLE_BOSS.sub("" if "进阶10" in text else "进阶10", text)
+    return text
+
+
 def normalize_slang(text: str, profile: GameProfile) -> str:
     """Rewrite fixed colloquialisms so existing vocabulary and mappings apply.
 
@@ -574,6 +621,8 @@ def normalize_slang(text: str, profile: GameProfile) -> str:
     plus = PLUS_TARGETS.get(profile.code)
     if plus:
         text = _rewrite_positioned(text, PLUS_SHORTHAND, plus)
+    if profile.code == "sts2":
+        text = _normalize_sts2_ascension(text)
     return text
 
 

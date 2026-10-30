@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 import httpx
 
 from .client import WikiClient
-from .games import STS2
+from .games import STS2, normalize_slang
 from .models import Section, WikiError
 from .selection import evidence
 
@@ -51,13 +51,102 @@ SEARCH_PATHS = {"mechanic": "mechanics"}
 GUIDE_TERMS = (
     ("boss", "boss"),
     ("BOSS", "boss"),
+    ("稀有度", "rarity"),
+    ("概率", "rates"),
+    ("商店", "shop"),
+    ("金币", "gold"),
+    ("地图", "map"),
+    ("精英", "elites"),
+    ("补丁", "patch"),
+    ("更新", "patch"),
+    ("胜率", "tier"),
+    ("排行", "tier"),
+    ("Tier", "tier"),
     ("机制", "mechanics"),
     ("规则", "mechanics"),
-    ("概率", "rates"),
+    ("伤害", "combat"),
+    ("格挡", "block"),
+    ("易伤", "vulnerable"),
+    ("虚弱", "weak"),
+    ("脆弱", "frail"),
+    ("叠加", "stack"),
+    ("结算", "combat"),
     ("流派", "build"),
     ("卡组", "build"),
+    ("进阶", "ascension"),
+    ("解锁", "unlock"),
+    ("成就", "achievement"),
+    ("剧情", "story"),
+    ("故事", "story"),
+    ("升级", "upgrade"),
+    ("休息", "rest"),
     ("攻略", "guide"),
     ("指南", "guide"),
+)
+# Query-level concept words: when the query itself is a concept (not an
+# entity prefix), try Chinese editorial content before fuzzy entity candidates.
+CONCEPT_WORDS = (
+    "伤害",
+    "易伤",
+    "格挡",
+    "机制",
+    "规则",
+    "结算",
+    "叠加",
+    "商店",
+    "价格",
+    "金币",
+    "稀有度",
+    "地图",
+    "精英",
+    "补丁",
+    "更新",
+    "胜率",
+    "排行",
+    "Tier",
+    "先古",
+    "纪元",
+    "解锁",
+    "成就",
+    "剧情",
+    "故事",
+    "进阶",
+    "章节",
+    "BOSS",
+    "boss",
+    "升级",
+    "休息",
+)
+GUIDE_INTENT_WORDS = (
+    "攻略",
+    "指南",
+    "卡组",
+    "流派",
+    "怎么玩",
+    "玩法",
+    "商店",
+    "金币",
+    "路线",
+    "补丁",
+    "更新",
+    "Tier",
+    "胜率",
+    "排行",
+    "精英",
+    "BOSS",
+    "boss",
+    "进阶",
+    "新手",
+    "先古",
+    "纪元",
+    "解锁",
+    "成就",
+    "剧情",
+    "故事",
+    "稀有度",
+    "概率",
+    "升级",
+    "休息",
 )
 
 # Types that /api/search often exposes only as a "reference" entry, or not
@@ -242,8 +331,10 @@ class SpireCodexService:
         timeout=15,
         base="",
         cdn="",
+        chinese=None,
     ):
         self.client = client
+        self.chinese = chinese
         # SourceRouter exposes the primary's profile for question
         # normalization; SpireCodexService is the sts2 primary, so it must
         # carry the same contract as QueryService and AkeService.
@@ -331,6 +422,9 @@ class SpireCodexService:
     async def _search(self, query, question):
         version = await self._version()
         original = query
+        # The AI tool may pass a raw A10/N10/敲牌 query; normalize before
+        # aliases and kind-prefix handling so the same rules apply.
+        query = normalize_slang(query, self.profile)
         query, prefix_kind = self._split_kind_prefix(query)
         normalized = self.aliases.get(query, query)
         data = None
@@ -363,9 +457,27 @@ class SpireCodexService:
             exact = await self._term_exact(wanted, hint)
             if exact and not items:
                 items = exact
+        concept = any(word in f"{normalized} {question}" for word in CONCEPT_WORDS)
+        if not exact and (not items or concept):
+            # Prefer Chinese editorial content for concept/guide questions;
+            # Spire Codex's guide/mechanics articles are English-only.
+            chinese = await self._chinese_result(normalized, question)
+            if chinese:
+                result = await self._entry(
+                    chinese["kind"], chinese["entity"], question, ""
+                )
+                return {**result, **base}
+            if concept:
+                # A concept query should not be answered by fuzzy entity
+                # candidates; try the English guide/mechanics index instead.
+                guide_items = await self._guide_items(f"{normalized} {question}")
+                if guide_items:
+                    items = guide_items
+                    # A single concept hit is unambiguous enough to read;
+                    # multiple hits stay as candidates for the user.
+                    exact = items if len(items) == 1 else []
         if not items:
-            # Chinese guide/mechanics questions have no entity to look up;
-            # /api/search indexes English titles, so map the question word.
+            # Fall back to Spire Codex's English guide/mechanics index.
             items = await self._guide_items(f"{normalized} {question}")
         if not items:
             return {
@@ -453,6 +565,46 @@ class SpireCodexService:
                     }
                 )
         return items
+
+    def _chinese_timeout(self) -> float:
+        # Editorial pages are large; cap the optional source so an English
+        # fallback still fits inside the overall query budget.
+        return max(1.0, min(8.0, self.timeout * 0.5))
+
+    async def _chinese_result(self, query, question):
+        if self.chinese is None:
+            return None
+        text = f"{query} {question}"
+        limit = self._chinese_timeout()
+        try:
+            if any(word in text for word in GUIDE_INTENT_WORDS):
+                guide = await asyncio.wait_for(
+                    self.chinese.guide(query, question), limit
+                )
+                if guide:
+                    return {
+                        "kind": "guide",
+                        "entity": {
+                            "id": guide["key"],
+                            "title": guide["title"],
+                            "content": guide["text"],
+                            "summary": guide["text"][:240],
+                        },
+                    }
+            mechanic = await asyncio.wait_for(self.chinese.mechanics(text), limit)
+            if mechanic:
+                return {
+                    "kind": "mechanic",
+                    "entity": {
+                        "id": mechanic["key"],
+                        "title": mechanic["title"],
+                        "body_markdown": mechanic["text"],
+                        "description": mechanic["text"][:300],
+                    },
+                }
+        except Exception:  # noqa: BLE001 - editorial source must not break queries
+            return None
+        return None
 
     async def _guide_items(self, text):
         for word, query in GUIDE_TERMS:
@@ -583,6 +735,8 @@ class SpireCodexService:
         return f"{name} · {detail}" if detail else name
 
     def _url(self, kind, key):
+        if str(key).startswith("cn:") and self.chinese is not None:
+            return self.chinese.url(str(key))
         if kind == "glossary":
             # Glossary terms are listed on the reference page; there is no
             # per-term frontend route.
@@ -632,6 +786,8 @@ class SpireCodexService:
         )
 
     async def _detail(self, kind, key):
+        if str(key).startswith("cn:") and self.chinese is not None:
+            return await self.chinese.read(str(key))
         data = await self.client.get(
             f"/api/{PATHS[kind]}/{str(key).lower()}", {"lang": "zhs"}, self.page_ttl
         )
@@ -680,6 +836,29 @@ class SpireCodexService:
                 sections.append(Section(title, "", lines))
 
         await self._build_sections(kind, entity, add)
+        guide_text = question + section
+        wants_character_guide = any(
+            word in guide_text
+            for word in ("攻略", "指南", "流派", "怎么玩", "玩法", "推荐")
+        ) or ("卡组" in guide_text and "初始" not in guide_text)
+        if kind == "character" and self.chinese is not None and wants_character_guide:
+            try:
+                guide = await asyncio.wait_for(
+                    self.chinese.guide(
+                        entity.get("name", ""),
+                        question,
+                        character=entity.get("name", ""),
+                    ),
+                    self._chinese_timeout(),
+                )
+            except Exception:  # noqa: BLE001 - optional editorial source
+                guide = None
+            if guide:
+                text = guide["text"]
+                add(
+                    "攻略",
+                    [guide["title"], text[:1500] + ("…" if len(text) > 1500 else "")],
+                )
         if kind in PAIRING_TYPES and any(
             word in question + section for word in COMMUNITY_WORDS
         ):

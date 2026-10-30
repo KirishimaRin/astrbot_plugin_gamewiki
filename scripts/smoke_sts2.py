@@ -9,6 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from wiki.cache import Cache  # noqa: E402
+from wiki.chineseguides import ChineseGuideService  # noqa: E402
 from wiki.spirecodex import SpireCodexClient, SpireCodexService  # noqa: E402
 
 # Structural expectations, not exact values: Spire Codex updates with the
@@ -28,14 +29,18 @@ CASES = (
     ("燃烧", "胜率", "胜率"),
     ("攻略", "", "正文"),
     ("机制", "", "正文"),
+    ("伤害怎么计算", "", "正文"),
+    ("静默猎手", "攻略", "攻略"),
 )
 
 
 async def main():
     records, failed = [], False
     with tempfile.TemporaryDirectory() as directory:
-        client = SpireCodexClient(Cache(Path(directory)), timeout=20)
-        service = SpireCodexService(client, timeout=40)
+        cache = Cache(Path(directory))
+        client = SpireCodexClient(cache, timeout=20)
+        chinese = ChineseGuideService(cache, timeout=20)
+        service = SpireCodexService(client, timeout=40, chinese=chinese)
         try:
             for name, question, expected in CASES:
                 try:
@@ -75,6 +80,7 @@ async def main():
                     )
         finally:
             await client.close()
+            await chinese.close()
     output = Path("research/sts2-smoke.json")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
