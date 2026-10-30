@@ -293,6 +293,14 @@
 - 附魔类概念问法必须同时在 CONCEPT_WORDS（拦截 /api/search 描述命中带来的无关遗物候选）与 CHINESE_GUIDE_WORDS（放行中文攻略尝试），缺一个就会退回噪声候选或 not_found。
 - 验证：pytest 432 passed；Ruff 通过；framework 4.5.7/4.29.3 通过；package 35 files/11,149,065 bytes；smoke 33/33；audit 75/75（含全部新增系统级问法）。未改版本号。
 
+## 鸣潮数据源调研（2026-10-30，分支 `feature/wuthering-waves-wiki`，尚未实施）
+
+- 结论可行，报告在 [docs/wuthering-waves-research.md](docs/wuthering-waves-research.md)。主源候选库街区官方 API（guest 可读），BWIKI `wutheringwaves` 站可先行复用现有设施。
+- 库街区三个实测坑：search 参数是 `keyword` 不是 `searchText`（后者报"wiki库类型不能为空"）；请求头要 `wiki_type: 9`（9=鸣潮）+ `source: h5`；`getEntryDetail` 的 id 是 `record.content.linkId`（雪花ID），不是目录记录 `record.id`（小卡片号会返回"当前词条不存在"且触发服务端慢路径超时）。
+- BWIKI 路径是 `wutheringwaves` 不是 `ww`：`source_api()` 按代码拼 URL 需加特判。角色页 `共鸣者/<名>`，无 `/攻略` 子页，`guide_suffix` 留空；声骸合鸣页是干净模板字段。
+- 游戏代码建议 `ww`，不要用库街区内部 key `mc`（与 Minecraft 混淆）。
+- 本次仅调研，未改运行逻辑。
+
 ## v0.4.0 版本（杀戮尖塔2接入与文档整理）
 
 - VERSION、metadata、README 与 CHANGELOG 同步为 v0.4.0。
