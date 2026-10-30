@@ -74,6 +74,7 @@ jobs:
       - run: python scripts/smoke.py
       - run: python scripts/audit_categories.py
       - run: python scripts/smoke_sts2.py
+      - run: python scripts/audit_sts2_queries.py --strict
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -82,6 +83,7 @@ jobs:
             research/live-smoke.json
             research/category-audit.json
             research/sts2-smoke.json
+            research/sts2-coverage.json
           if-no-files-found: ignore
 
   release:

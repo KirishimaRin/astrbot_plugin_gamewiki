@@ -577,6 +577,35 @@ def make_service(tmp_path, calls=None):
                             ],
                         }
                     ],
+                    "deaths": {
+                        "encounters": [
+                            {
+                                "id": "KNOWLEDGE_DEMON_BOSS",
+                                "name": "Knowledge Demon",
+                                "count": 86329,
+                                "pct": 5.5,
+                            }
+                        ]
+                    },
+                    "ancient_picks": [
+                        {
+                            "id": "ARCANE_SCROLL",
+                            "name": "Arcane Scroll",
+                            "pct": 3.3,
+                            "take_rate": 56.8,
+                        }
+                    ],
+                    "rest_sites": [
+                        {
+                            "id": "SMITH",
+                            "label": "Smith",
+                            "pct": 54.6,
+                            "win_rate": 59.4,
+                        }
+                    ],
+                    "most_removed": [{"id": "STRIKE", "name": "Strike", "pct": 51.1}],
+                    "reward_skip_rate": 28.5,
+                    "data_through": "2026-10-30",
                 },
             )
         if path == "/api/ascensions":
@@ -1040,3 +1069,32 @@ def test_story_epoch_and_merchant_meta(tmp_path):
     assert merchant["status"] == "ok"
     text = "\n".join(item["text"] for item in merchant["evidence"])
     assert "75" in text and "100" in text
+
+
+def test_community_meta_queries(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            deaths = await service.search("哪些BOSS最容易死", "")
+            rest = await service.search("篝火选什么", "")
+            removed = await service.search("删什么牌", "")
+            ancient = await service.search("先古祝福怎么选", "")
+            skip = await service.search("跳过奖励", "")
+            return deaths, rest, removed, ancient, skip
+        finally:
+            await client.close()
+
+    deaths, rest, removed, ancient, skip = asyncio.run(run())
+    assert deaths["status"] == "ok"
+    assert "致命遭遇" in deaths["available_sections"]
+    assert "Knowledge Demon" in "\n".join(item["text"] for item in deaths["evidence"])
+    assert rest["status"] == "ok" and "篝火选择" in rest["available_sections"]
+    assert "锻造" in "\n".join(item["text"] for item in rest["evidence"])
+    assert removed["status"] == "ok" and "最常删除" in removed["available_sections"]
+    assert "Strike" in "\n".join(item["text"] for item in removed["evidence"])
+    assert ancient["status"] == "ok" and "先古选取" in ancient["available_sections"]
+    assert "Arcane Scroll" in "\n".join(item["text"] for item in ancient["evidence"])
+    assert skip["status"] == "ok" and "28.5" in "\n".join(
+        item["text"] for item in skip["evidence"]
+    )

@@ -145,7 +145,7 @@
 - 搜索会命中描述且同名实体多：`search` 必须精确名称优先；同名候选带角色/类型标签，并设置 `choice_intro`，不能沿用“没有同名条目”的默认文案。
 - BBCode：`clean()` 把 `[energy:N]` 转 `N费`、空强调对 `[blue][/blue]` 转 `X`；能力 `description` 可能丢数值，`effect_text` 先 `description` 后 `description_raw`。不要把 `[gold]` 等标签原样送进卡片或模型。
 - `_tool_read` 对 sts2 单独处理：source 留空或 `spirecodex`；不要走 `read_from_source`（它只认 bwiki 且会拒绝其他游戏）。
-- 验证：`pytest -q` 394 passed；Ruff 通过；framework 4.5.7/4.29.3 通过；package 35 files/11,126,035 bytes；真实 API 冒烟 25/25 覆盖遗物、同名卡、怪物、事件分支、角色初始卡组、出招顺序、能力、术语、充能球、搭配、胜率、攻略、机制、中文伤害/进阶、进阶等级、成就、解锁、章节精英、事件社区选择、剧情/纪元、商店规则与同类型对比。
+- 验证：`pytest -q` 395 passed；Ruff 通过；framework 4.5.7/4.29.3 通过；package 35 files/11,127,649 bytes；真实 API 冒烟 25/25、覆盖率审计 37/37，覆盖实体、方面、术语、攻略/机制、Meta、事件、社区统计、剧情/商店与同类型对比。
 - 尚无备用源；Spire Codex 故障时只能明确报错。未改版本号。
 
 ## 杀戮尖塔2 计划内增强（2026-10-30）
@@ -205,3 +205,11 @@
 - 商店：`/api/merchant/config` 是单对象，`_detail("merchant", "MERCHANT")` 特殊读取；按删牌、卡牌、遗物、药水、假商人分节；稀有度英文键用 `RARITY_NAMES` 转中文。
 - `_names` 对空 ID 列表直接返回，避免为无解锁内容的纪元请求卡牌/药水全表。
 - 文本字段统一过 `clean()`，避免 `[red]` 等游戏 BBCode 进入回答。
+
+## 杀戮尖塔2 社区统计与覆盖率审计（2026-10-30）
+
+- `community` 合成实体覆盖：致命遭遇（`deaths.encounters`）、先古选取（`ancient_picks`）、篝火选择（`rest_sites`）、最常删除（`most_removed`）、奖励跳过率（`reward_skip_rate`）；`_meta_result` 用“致命/容易死/篝火/删什么/先古祝福/跳过奖励”触发。
+- 统计名称优先用实体索引解析中文：致命遭遇查 encounter，先Ancient查 relic，最常删除查 card；解析不到时回退 stats 里的英文 name。篝火 label 用 `REST_NAMES` 映射，未知标签保留原文。
+- 中文攻略源只处理构筑/路线/商店/新手/进阶/先古等主题；补丁、Tier、稀有度、解锁等改走 Spire Codex 专属英文页，避免模糊中文攻略抢占。
+- `scripts/audit_sts2_queries.py` 固定 37 条用户问法，覆盖实体、方面、中文源、Meta、事件、社区统计与对比；`--strict` 默认 80% 阈值，当前 37/37。已加入 CI drift 并输出 `research/sts2-coverage.json`。
+- 中文源首次抓取大页面可能较慢；`_chinese_timeout` 调整为 `min(20, timeout*0.8)`，超时仍回退英文。

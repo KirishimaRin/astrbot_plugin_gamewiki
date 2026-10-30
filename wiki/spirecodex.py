@@ -48,6 +48,7 @@ PATHS = {
     "story": "stories",
     "ancient": "ancient-pools",
     "merchant": "merchant/config",
+    "community": "community",
 }
 
 # /api/search names the mechanics category "mechanics"; the adapter uses the
@@ -156,6 +157,26 @@ GUIDE_INTENT_WORDS = (
     "升级",
     "休息",
 )
+# Chinese editorial guides reliably cover build/route/shop topics. Patch,
+# tier, rarity and unlock questions are better served by Spire Codex's
+# dedicated English pages, so don't let a fuzzy Chinese guide claim them.
+CHINESE_GUIDE_WORDS = (
+    "攻略",
+    "指南",
+    "卡组",
+    "流派",
+    "怎么玩",
+    "玩法",
+    "路线",
+    "新手",
+    "商店",
+    "金币",
+    "进阶",
+    "先古",
+    "纪元",
+    "篝火",
+    "休息",
+)
 
 # Types that /api/search often exposes only as a "reference" entry, or not
 # at all. Their list endpoints are small, so an exact-name fallback is cheap.
@@ -228,6 +249,21 @@ RARITY_NAMES = {
     "Uncommon": "罕见",
     "Rare": "稀有",
     "Shop": "商店",
+}
+COMMUNITY_TITLES = {
+    "deaths": "致命遭遇",
+    "ancient": "先古选取",
+    "rest": "篝火选择",
+    "removed": "最常删除",
+    "skip": "奖励跳过率",
+}
+REST_NAMES = {
+    "Smith": "锻造",
+    "Heal": "休息",
+    "Mend": "修复",
+    "Dig": "挖掘",
+    "Lift": "举重",
+    "Cook": "烹饪",
 }
 STACK_TYPES = {"Counter": "可叠加", "Single": "不可叠加"}
 GLOSSARY_CATEGORIES = {
@@ -666,6 +702,20 @@ class SpireCodexService:
         return items
 
     @staticmethod
+    def _community_key(text):
+        if any(word in text for word in ("致命", "容易死", "死因", "死亡")):
+            return "deaths"
+        if any(word in text for word in ("篝火", "营地", "休息", "锻造还是")):
+            return "rest"
+        if any(word in text for word in ("删什么", "该删", "删哪")):
+            return "removed"
+        if any(word in text for word in ("先古", "古神", "祝福")):
+            return "ancient"
+        if any(word in text for word in ("跳过奖励", "跳牌")):
+            return "skip"
+        return ""
+
+    @staticmethod
     def _act_from_text(text):
         words = (
             (0, ("第一章", "第一幕", "密林", "overgrowth")),
@@ -706,6 +756,26 @@ class SpireCodexService:
                 name = str(item.get("name", ""))
                 if name and name in text:
                     return await self._entry("unlock", item, question, "")
+        community_key = self._community_key(text)
+        if community_key:
+            try:
+                stats = await self.client.get(
+                    "/api/runs/community-stats", {}, self.page_ttl
+                )
+            except WikiError:
+                stats = {}
+            if isinstance(stats, dict) and stats:
+                return await self._entry(
+                    "community",
+                    {
+                        "id": community_key.upper(),
+                        "title": COMMUNITY_TITLES.get(community_key, "社区统计"),
+                        "metric": community_key,
+                        "data": stats,
+                    },
+                    question,
+                    "",
+                )
         if any(word in text for word in ("商店", "价格", "商人", "删牌")):
             try:
                 config = await self.client.get(
@@ -911,7 +981,7 @@ class SpireCodexService:
     def _chinese_timeout(self) -> float:
         # Editorial pages are large; cap the optional source so an English
         # fallback still fits inside the overall query budget.
-        return max(1.0, min(8.0, self.timeout * 0.5))
+        return max(1.0, min(20.0, self.timeout * 0.8))
 
     async def _chinese_result(self, query, question):
         if self.chinese is None:
@@ -919,7 +989,7 @@ class SpireCodexService:
         text = f"{query} {question}"
         limit = self._chinese_timeout()
         try:
-            if any(word in text for word in GUIDE_INTENT_WORDS):
+            if any(word in text for word in CHINESE_GUIDE_WORDS):
                 guide = await asyncio.wait_for(
                     self.chinese.guide(query, question), limit
                 )
@@ -1093,6 +1163,8 @@ class SpireCodexService:
             return f"{self.base}/zhs/ancients"
         if kind == "merchant":
             return f"{self.base}/zhs/merchant"
+        if kind == "community":
+            return f"{self.base}/zhs/stats"
         return f"{self.base}/zhs/{PATHS[kind]}/{str(key).lower()}"
 
     def _image_url(self, kind, entity):
@@ -1154,6 +1226,19 @@ class SpireCodexService:
             if str(key) != "MERCHANT" or not isinstance(config, dict):
                 return None
             return {"id": "MERCHANT", "title": "商店", "config": config}
+        if kind == "community":
+            metric = str(key)
+            stats = await self.client.get(
+                "/api/runs/community-stats", {}, self.page_ttl
+            )
+            if not isinstance(stats, dict):
+                return None
+            return {
+                "id": metric,
+                "title": COMMUNITY_TITLES.get(metric, "社区统计"),
+                "metric": metric,
+                "data": stats,
+            }
         data = await self.client.get(
             f"/api/{PATHS[kind]}/{str(key).lower()}", {"lang": "zhs"}, self.page_ttl
         )
@@ -1406,6 +1491,8 @@ class SpireCodexService:
             await self._ancient_sections(entity, add)
         elif kind == "merchant":
             self._merchant_sections(entity, add)
+        elif kind == "community":
+            await self._community_meta_sections(entity, add)
         else:
             self._generic_sections(kind, entity, add)
 
@@ -2025,6 +2112,77 @@ class SpireCodexService:
         fake = config.get("fake_merchant") or {}
         if isinstance(fake, dict) and fake.get("relic_cost") is not None:
             add("假商人", [f"遗物价格：{fake['relic_cost']} 金"])
+
+    async def _community_meta_sections(self, entity, add):
+        metric = entity.get("metric")
+        data = entity.get("data") or {}
+        add(
+            "基本信息",
+            [
+                f"统计截至：{data.get('data_through', '未知')}",
+                "数据来自玩家提交对局，仅供参考。",
+            ],
+        )
+        if metric == "deaths":
+            rows = [
+                item
+                for item in (data.get("deaths") or {}).get("encounters") or []
+                if isinstance(item, dict)
+            ]
+            names = await self._names("encounter", [item.get("id") for item in rows])
+            add(
+                "致命遭遇",
+                [
+                    f"{names[index] if names[index] != item.get('id') else item.get('name')}"
+                    f"：{item.get('pct')}%"
+                    for index, item in enumerate(rows)
+                ],
+            )
+        elif metric == "ancient":
+            rows = [
+                item
+                for item in data.get("ancient_picks") or []
+                if isinstance(item, dict)
+            ]
+            names = await self._names("relic", [item.get("id") for item in rows])
+            add(
+                "先古选取",
+                [
+                    f"{names[index] if names[index] != item.get('id') else item.get('name')}"
+                    f"：选取率 {item.get('take_rate')}%，占比 {item.get('pct')}%"
+                    for index, item in enumerate(rows)
+                ],
+            )
+        elif metric == "rest":
+            rows = data.get("rest_sites") or []
+            add(
+                "篝火选择",
+                [
+                    f"{REST_NAMES.get(item.get('label'), item.get('label'))}："
+                    f"选择 {item.get('pct')}%，胜率 {item.get('win_rate')}%"
+                    for item in rows
+                    if isinstance(item, dict)
+                ],
+            )
+        elif metric == "removed":
+            rows = [
+                item
+                for item in data.get("most_removed") or []
+                if isinstance(item, dict)
+            ]
+            names = await self._names("card", [item.get("id") for item in rows])
+            add(
+                "最常删除",
+                [
+                    f"{names[index] if names[index] != item.get('id') else item.get('name')}"
+                    f"：{item.get('pct')}%"
+                    for index, item in enumerate(rows)
+                ],
+            )
+        elif metric == "skip":
+            rate = data.get("reward_skip_rate")
+            if rate is not None:
+                add("奖励跳过率", [f"跳过奖励比例：{rate}%"])
 
     def _guide_sections(self, entity, add):
         info = []
