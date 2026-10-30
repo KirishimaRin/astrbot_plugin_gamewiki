@@ -126,6 +126,10 @@ class AkeService:
         timeout=15,
     ):
         self.client = client
+        # SourceRouter exposes the primary's profile for question normalization;
+        # AkeService is the zmd primary, so it must carry the same contract as
+        # QueryService.
+        self.profile = ZMD
         self.aliases = aliases or {}
         self.search_ttl, self.page_ttl = search_ttl, page_ttl
         self.max_chars, self.timeout = max_chars, timeout

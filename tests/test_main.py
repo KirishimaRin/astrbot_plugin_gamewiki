@@ -976,3 +976,28 @@ def test_doctor_reports_the_configured_model(plugin):
     text = asyncio.run(instance._doctor_text(Event()))
     assert "插件模型：固定使用 my-model" in text
     assert "已回退会话模型 2 次" in text
+
+
+def test_zmd_tool_read_uses_the_endfield_profile(plugin):
+    """EndfieldSources.profile 取自主源；AkeService 必须带 profile 契约。"""
+    instance, Event, _ = plugin
+    configured = type(instance)(
+        object(), {"games": ["zmd"], "user_cooldown_seconds": 0}
+    )
+    try:
+        router = configured.services["zmd"]
+        assert router.profile.code == "zmd"
+        captured = {}
+
+        async def fake_read(page_id, question, section):
+            captured["question"] = question
+            return {"status": "ok", "title": "祀"}
+
+        router.primary.read = fake_read
+        result = asyncio.run(
+            configured._tool_read(Event(), 123, "", "满潜", "zmd", "akedata")
+        )
+        assert result["status"] == "ok"
+        assert captured["question"] == "潜能"
+    finally:
+        asyncio.run(configured.terminate())

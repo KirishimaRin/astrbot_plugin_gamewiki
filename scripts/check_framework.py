@@ -235,6 +235,11 @@ async def main():
         class Service:
             command_query = staticmethod(lambda text: tuple(text.split(maxsplit=1)))
 
+            def __init__(self, code="ys"):
+                # Real QueryService exposes the game profile used for slang
+                # normalization on both the command and tool paths.
+                self.profile = module.PROFILES[code]
+
             async def clear_parse_cache(self):
                 return 0
 
@@ -247,7 +252,7 @@ async def main():
             def stats(self):
                 return {"errors": {}}
 
-        plugin.services = {"ys": Service(), "sr": Service()}
+        plugin.services = {"ys": Service("ys"), "sr": Service("sr")}
         for old_parameter in ("统计", "清缓存"):
             event = Event(f"ys {old_parameter}")
             event.is_admin = lambda: True
@@ -358,7 +363,7 @@ async def main():
         denied = [r async for r in plugin.wiki_command_ys(Event("ys help"))]
         assert "当前会话未启用" in denied[0]
         plugin.sessions = set()
-        plugin.services = {"ys": Service(), "sr": Service()}
+        plugin.services = {"ys": Service("ys"), "sr": Service("sr")}
         assert [p["name"] for p in tools["genshin_wiki_search"]["args"]] == [
             "query",
             "question",

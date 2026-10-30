@@ -117,3 +117,7 @@
 
 - VERSION、metadata、README 与 CHANGELOG 同步为 v0.3.0。本版包含黑话归一、卡池聚合页、攻略子页、独立模型配置（`model_provider`）、配装与基础信息方面词、比较与未命中重试等改动，文档由外部 agent 重写后经本仓库校对。
 - 发布走既有流程：提交后打 `v0.3.0` 标签并推送，CI 的 `release` 任务校验标签与 metadata 一致、从 CHANGELOG 的 `## v0.3.0 —` 段落生成 Release Notes、打包 ZIP 并标记 Latest。
+
+## v0.3.0 发布修正
+
+- CI framework 契约检查发现：`SourceRouter.profile` 取 `primary.profile`，而终末地主源 `AkeService` 没有该属性，导致 `/zmd` 的 AI 工具路径在归一 question 时 AttributeError。已给 `AkeService` 补 `profile = ZMD`，并补 `满潜/几潜/0潜` 的终末地归一；`scripts/check_framework.py` 的 Service 桩补 `profile`。新增 `test_zmd_tool_read_uses_the_endfield_profile` 防止回归。今后给 SourceRouter 增加依赖主源属性的逻辑时，必须同时确认 QueryService 与 AkeService 两侧契约。
