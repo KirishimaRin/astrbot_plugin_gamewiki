@@ -47,10 +47,17 @@ def format_compare(result: dict) -> str:
         return "\n".join(lines)
     if status == "compare_unsupported":
         left, right = result.get("left", {}), result.get("right", {})
+
+        def line(side):
+            title = side.get("title", "")
+            summary = side.get("summary")
+            if summary:
+                return f"{title}：{summary}\n{side.get('url', '')}"
+            return f"{title}：{side.get('url', '')}"
+
         return (
             f"{result.get('message', '这两个条目不能直接比较。')}\n\n"
-            f"{left.get('title')}：{left.get('url', '')}\n"
-            f"{right.get('title')}：{right.get('url', '')}"
+            f"{line(left)}\n\n{line(right)}"
         )
     if status == "compare_unavailable":
         left, right = result.get("left", {}), result.get("right", {})

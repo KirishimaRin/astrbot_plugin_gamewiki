@@ -204,6 +204,15 @@ ENCOUNTERS = [
 MONSTERS = [
     {"id": "WRIGGLER", "name": "扭动虫", "type": "Elite", "min_hp": 10, "max_hp": 12}
 ]
+ANCIENT_POOLS = [
+    {
+        "id": "DARV",
+        "name": "Darv",
+        "description": "Has a large pool of powerful relics.",
+        "selection": "3 from pool or 2 + Dusty Tome",
+        "pools": [],
+    }
+]
 EPOCHS = [
     {
         "id": "SILENT1_EPOCH",
@@ -616,6 +625,8 @@ def make_service(tmp_path, calls=None):
             return httpx.Response(200, json=STORIES)
         if path == "/api/merchant/config":
             return httpx.Response(200, json=MERCHANT_CONFIG)
+        if path == "/api/ancient-pools":
+            return httpx.Response(200, json=ANCIENT_POOLS)
         if path == "/api/acts":
             return httpx.Response(200, json=ACTS)
         if path == "/api/achievements":
@@ -1098,3 +1109,64 @@ def test_community_meta_queries(tmp_path):
     assert skip["status"] == "ok" and "28.5" in "\n".join(
         item["text"] for item in skip["evidence"]
     )
+
+
+def test_qualified_same_name_card_is_disambiguated(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            return await service.search("打击（铁甲战士）", "")
+        finally:
+            await client.close()
+
+    result = asyncio.run(run())
+    assert result["status"] == "ok"
+    assert result["title"] == "打击"
+
+
+def test_compare_qualified_same_name_cards(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            return await service.compare("打击（铁甲战士）", "防御（铁甲战士）")
+        finally:
+            await client.close()
+
+    result = asyncio.run(run())
+    assert result["status"] == "compare"
+    assert result["kind"] == "card"
+
+
+def test_cross_kind_compare_includes_summaries(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            return await service.compare("燃烧之血", "重击")
+        finally:
+            await client.close()
+
+    result = asyncio.run(run())
+    assert result["status"] == "compare_unsupported"
+    assert result["left"]["summary"]
+    assert result["right"]["summary"]
+    text = format_compare(result)
+    assert "回复6点生命" in text and "造成6点伤害" in text
+
+
+def test_ancient_list_meta(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            return await service.search("先古之民有哪些", "")
+        finally:
+            await client.close()
+
+    result = asyncio.run(run())
+    assert result["status"] == "ok"
+    assert result["title"] == "先古之民"
+    assert "先古列表" in result["available_sections"]
+    assert "Darv" in "\n".join(item["text"] for item in result["evidence"])

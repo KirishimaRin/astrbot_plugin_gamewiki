@@ -294,6 +294,28 @@ ENERGY_TAG = re.compile(r"\[energy:(\d+)\]")
 PLACEHOLDER = re.compile(r"\{[^{}]{1,80}\}")
 TITLE_TRIM = re.compile(r"[\s。！？～，、；：…（）()\[\]【】「」『』\"'”’]+$")
 CJK = re.compile(r"[一-鿿]")
+QUALIFIED_QUERY = re.compile(r"^(.+?)\s*[（(·|｜]\s*([^）)]+?)\s*[）)]?$")
+QUALIFIER_WORDS = {
+    *CHARACTERS.values(),
+    *CHARACTERS.keys(),
+    "角色",
+    "卡牌",
+    "遗物",
+    "药水",
+    "怪物",
+    "攻击",
+    "技能",
+    "能力",
+    "基础",
+    "普通",
+    "罕见",
+    "稀有",
+    "初始遗物",
+    "商店遗物",
+    "事件遗物",
+    "Boss",
+    "精英",
+}
 MARKDOWN_LINK = re.compile(r"\[([^\]]+)\]\([^)]+\)")
 WIKILINK = re.compile(r"\[\[(?:[a-z]+:)?([^\]]+)\]\]")
 
@@ -498,14 +520,6 @@ class SpireCodexService:
             }
         kind_a = KIND_BY_CODE.get(left.get("page_id", 0) >> 48)
         kind_b = KIND_BY_CODE.get(right.get("page_id", 0) >> 48)
-        if kind_a != kind_b or kind_a not in {"card", "relic", "character"}:
-            return {
-                **base,
-                "status": "compare_unsupported",
-                "message": "这两个条目类型不同，不能直接逐项对比；请分别查看。",
-                "left": {"title": left.get("title"), "url": left.get("url")},
-                "right": {"title": right.get("title"), "url": right.get("url")},
-            }
         entity_a = await self._entity(left["page_id"])
         entity_b = await self._entity(right["page_id"])
         if entity_a is None or entity_b is None:
@@ -515,6 +529,22 @@ class SpireCodexService:
                 "message": "无法读取其中一个条目的完整数据，请稍后重试。",
                 "left": {"title": left.get("title"), "url": left.get("url")},
                 "right": {"title": right.get("title"), "url": right.get("url")},
+            }
+        if kind_a != kind_b or kind_a not in {"card", "relic", "character"}:
+            return {
+                **base,
+                "status": "compare_unsupported",
+                "message": "这两个条目类型不同，不能直接逐项对比；下面附上两边摘要。",
+                "left": {
+                    "title": left.get("title"),
+                    "url": left.get("url"),
+                    "summary": effect_text(entity_a)[:240],
+                },
+                "right": {
+                    "title": right.get("title"),
+                    "url": right.get("url"),
+                    "summary": effect_text(entity_b)[:240],
+                },
             }
         dimensions = await self._compare_dimensions(kind_a, entity_a, entity_b)
         metrics = await self._compare_metrics(kind_a, entity_a, entity_b)
@@ -710,7 +740,10 @@ class SpireCodexService:
             return "rest"
         if any(word in text for word in ("删什么", "该删", "删哪")):
             return "removed"
-        if any(word in text for word in ("先古", "古神", "祝福")):
+        if any(
+            word in text
+            for word in ("先古祝福", "古神祝福", "祝福怎么选", "先古选什么")
+        ):
             return "ancient"
         if any(word in text for word in ("跳过奖励", "跳牌")):
             return "skip"
@@ -817,6 +850,25 @@ class SpireCodexService:
                     question,
                     "",
                 )
+        if any(word in text for word in ("先古", "古神")):
+            ancients = await self._index("ancient", "zhs")
+            item = next(
+                (
+                    entry
+                    for entry in ancients
+                    if entry.get("name") and entry["name"] in text
+                ),
+                None,
+            )
+            if item is not None:
+                return await self._entry("ancient", item, question, "")
+            if ancients:
+                return await self._entry(
+                    "ancient",
+                    {"id": "ALL", "name": "先古之民", "ancients": ancients},
+                    question,
+                    "",
+                )
         act_intent = any(word in text for word in ("章", "幕", "精英", "BOSS", "boss"))
         act_index = self._act_from_text(text) if act_intent else None
         if act_index is not None:
@@ -835,6 +887,7 @@ class SpireCodexService:
         # aliases and kind-prefix handling so the same rules apply.
         query = normalize_slang(query, self.profile)
         query, prefix_kind = self._split_kind_prefix(query)
+        query, qualifier = self._split_qualified(query)
         normalized = self.aliases.get(query, query)
         data = None
         items = []
@@ -854,6 +907,8 @@ class SpireCodexService:
         }
         wanted = name_key(normalized)
         exact = [item for item in items if name_key(item["name"]) == wanted]
+        if qualifier and exact:
+            exact = [item for item in exact if qualifier in self._label(item)]
         hint = prefix_kind or self._kind_hint(question)
         # Glossary/orb/affliction entries often appear only as a "reference"
         # hit, or not in /api/search at all. Their lists are small enough to
@@ -912,6 +967,10 @@ class SpireCodexService:
                 }
             result = await self._entry(exact[0]["kind"], entity, question, "")
             return {**result, **base}
+        if qualifier and not exact:
+            qualified = [item for item in items if qualifier in self._label(item)]
+            if qualified:
+                items = qualified
         hits = exact or items
         payload = {
             **base,
@@ -925,6 +984,21 @@ class SpireCodexService:
                 f"找到多个与「{original}」相关的条目，请回复编号选择："
             )
         return payload
+
+    @staticmethod
+    def _split_qualified(query):
+        """Split “打击（铁甲战士）” without breaking “树叶史莱姆（中）”.
+
+        Parentheses in real entity names are common; only treat the tail as
+        a qualifier when it names a known character/type.
+        """
+        match = QUALIFIED_QUERY.match(query)
+        if not match:
+            return query, ""
+        name, qualifier = match.group(1).strip(), match.group(2).strip()
+        if not name or qualifier not in QUALIFIER_WORDS:
+            return query, ""
+        return name, qualifier
 
     @staticmethod
     def _split_kind_prefix(query):
@@ -982,7 +1056,7 @@ class SpireCodexService:
     def _chinese_timeout(self) -> float:
         # Editorial pages are large; cap the optional source so an English
         # fallback still fits inside the overall query budget.
-        return max(1.0, min(20.0, self.timeout * 0.8))
+        return max(1.0, min(30.0, self.timeout * 0.8))
 
     async def _chinese_result(self, query, question):
         if self.chinese is None:
@@ -2059,6 +2133,18 @@ class SpireCodexService:
             add("故事线", lines)
 
     async def _ancient_sections(self, entity, add):
+        ancients = entity.get("ancients")
+        if isinstance(ancients, list):
+            names = [str(item.get("name", "")) for item in ancients if item.get("name")]
+            add(
+                "基本信息",
+                [
+                    f"名称：{entity.get('name', '')}",
+                    "包含先古：" + "、".join(names),
+                ],
+            )
+            add("先古列表", names)
+            return
         info = []
         for field, label in (
             ("name", "名称"),

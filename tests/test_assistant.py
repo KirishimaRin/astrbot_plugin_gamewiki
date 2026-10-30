@@ -667,3 +667,32 @@ class TestSTS2Comparison(unittest.IsolatedAsyncioTestCase):
         )
         service.compare.assert_awaited_once()
         assert "【对比】" in reply and "稀有度" in reply
+
+    async def test_sts2_comparison_rejects_unbacked_numbers(self):
+        service, generate = (
+            Service(),
+            AsyncMock(return_value="红头骨胜率 99.9%，明显更强。"),
+        )
+        service.compare = AsyncMock(
+            return_value={
+                "status": "compare",
+                "game": "sts2",
+                "kind": "relic",
+                "query": "燃烧之血 vs 红头骨",
+                "left": {
+                    "title": "燃烧之血",
+                    "url": "a",
+                    "metrics": {"win_rate": 40.0},
+                },
+                "right": {"title": "红头骨", "url": "b", "metrics": {"win_rate": 50.0}},
+                "dimensions": [
+                    {"label": "稀有度", "left": "初始遗物", "right": "普通"}
+                ],
+                "source_urls": ["a", "b"],
+            }
+        )
+        reply, metrics = await CommandAssistant(generate).answer(
+            "燃烧之血和红头骨哪个好为什么", PROFILES["sts2"], service
+        )
+        assert "99.9" not in reply
+        assert metrics["fallback"] is True

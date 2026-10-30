@@ -328,6 +328,12 @@ class ChineseGuideService:
         }
 
     async def guide(self, query: str, question: str = "", character: str = ""):
+        if character:
+            # Character pages are smaller and cover all five characters
+            # (STS2.INFO's guide list only has Ironclad/Defect).
+            front = await self._sts2front_character(character)
+            if front:
+                return front
         items = await self._get(STS2INFO_GUIDES, 21600, self._parse_guide_list)
         if not items:
             return None

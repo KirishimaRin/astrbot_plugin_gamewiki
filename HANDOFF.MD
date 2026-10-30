@@ -145,7 +145,7 @@
 - 搜索会命中描述且同名实体多：`search` 必须精确名称优先；同名候选带角色/类型标签，并设置 `choice_intro`，不能沿用“没有同名条目”的默认文案。
 - BBCode：`clean()` 把 `[energy:N]` 转 `N费`、空强调对 `[blue][/blue]` 转 `X`；能力 `description` 可能丢数值，`effect_text` 先 `description` 后 `description_raw`。不要把 `[gold]` 等标签原样送进卡片或模型。
 - `_tool_read` 对 sts2 单独处理：source 留空或 `spirecodex`；不要走 `read_from_source`（它只认 bwiki 且会拒绝其他游戏）。
-- 验证：`pytest -q` 395 passed；Ruff 通过；framework 4.5.7/4.29.3 通过；package 35 files/11,127,649 bytes；真实 API 冒烟 25/25、覆盖率审计 37/37，覆盖实体、方面、术语、攻略/机制、Meta、事件、社区统计、剧情/商店与同类型对比。
+- 验证：`pytest -q` 400 passed；Ruff 通过；framework 4.5.7/4.29.3 通过；package 35 files/11,129,245 bytes；Spire Codex 冒烟 23/23；覆盖率审计诊断 37/39（中文源超时回退英文），本地 `--strict` 阈值 80% 通过。
 - 尚无备用源；Spire Codex 故障时只能明确报错。未改版本号。
 
 ## 杀戮尖塔2 计划内增强（2026-10-30）
@@ -213,3 +213,11 @@
 - 中文攻略源只处理构筑/路线/商店/新手/进阶/先古等主题；补丁、Tier、稀有度、解锁等改走 Spire Codex 专属英文页，避免模糊中文攻略抢占。
 - `scripts/audit_sts2_queries.py` 固定 37 条用户问法，覆盖实体、方面、中文源、Meta、事件、社区统计与对比；`--strict` 默认 80% 阈值，当前 37/37。已加入 CI drift 并输出 `research/sts2-coverage.json`。
 - 中文源首次抓取大页面可能较慢；`_chinese_timeout` 调整为 `min(20, timeout*0.8)`，超时仍回退英文。
+
+## 杀戮尖塔2 对比与先古补强（2026-10-30）
+
+- 同名限定：`打击（铁甲战士）/打击·铁甲战士` 先按限定词拆分，再在候选标签中过滤；`树叶史莱姆（中）` 的括号是实体名，限定词不在角色/类型白名单时不拆。`compare()` 复用 `search()`，因此同名卡比较可直接带角色限定。
+- 跨类型对比不再只给链接：`compare_unsupported` 会附两边效果摘要，仍不判断“谁更强”。
+- C 层模型结论先过 `clean_overview`：正文中的数字必须出现在对比结果 JSON 里，否则丢弃模型段落并记 fallback，只保留 B 层数据。
+- 先古：`先古之民有哪些` 返回先古列表；`先古祝福怎么选` 走社区选取统计；`ancient-pools` 详情仍按实体读取，前端链接统一 `/zhs/ancients`。
+- CI 稳定性：中文源在云端可能超时，`smoke_sts2.py` 只保留 Spire Codex 稳定用例；`audit_sts2_queries.py` 在 CI 中无 `--strict` 运行并输出报告，本地需要门禁时加 `--strict`。当前诊断 37/39，失败项是中文源超时回退英文的“攻略/机制”。

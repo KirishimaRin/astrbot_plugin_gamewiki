@@ -50,6 +50,13 @@ SILENT_HTML = """
 </body></html>
 """
 
+IRONCLAD_HTML = """
+<html><body>
+  <h1>铁甲战士</h1>
+  <main><section><p>铁甲战士靠力量和消耗取胜。</p></section></main>
+</body></html>
+"""
+
 
 def make_service(tmp_path, calls=None):
     calls = calls if calls is not None else []
@@ -65,6 +72,8 @@ def make_service(tmp_path, calls=None):
             return httpx.Response(200, text=GUIDE_HTML)
         if path == "/zh-cn/characters/silent/":
             return httpx.Response(200, text=SILENT_HTML)
+        if path == "/zh-cn/characters/ironclad/":
+            return httpx.Response(200, text=IRONCLAD_HTML)
         return httpx.Response(404, text="Not Found")
 
     return (
@@ -120,7 +129,7 @@ def test_character_guide_prefers_sts2info_then_sts2front(tmp_path):
             await service.close()
 
     ironclad, silent = asyncio.run(run())
-    assert ironclad["key"] == "cn:guide:sts2info:ironclad-starter-guide"
+    assert ironclad["key"] == "cn:guide:sts2front:ironclad"
     assert "力量" in ironclad["text"]
     assert silent["key"] == "cn:guide:sts2front:silent"
     assert "奇巧" in silent["text"]

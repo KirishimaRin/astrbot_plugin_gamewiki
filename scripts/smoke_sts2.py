@@ -27,10 +27,6 @@ CASES = (
     ("黑暗", "", "效果"),
     ("燃烧", "搭配", "搭配"),
     ("燃烧", "胜率", "胜率"),
-    ("攻略", "", "正文"),
-    ("机制", "", "正文"),
-    ("伤害怎么计算", "", "正文"),
-    ("静默猎手", "攻略", "攻略"),
     ("进阶10", "", "社区胜率"),
     ("成就", "", "成就列表"),
     ("怎么解锁静默猎手", "", "解锁条件"),
@@ -39,8 +35,13 @@ CASES = (
     ("剧情", "", "故事线"),
     ("商店价格", "", "删牌服务"),
     ("迷雾压境 纪元", "", "故事"),
+    ("先古之民有哪些", "", "先古列表"),
 )
-COMPARE_CASES = (("燃烧", "痛击"), ("燃烧之血", "红头骨"))
+COMPARE_CASES = (
+    ("燃烧", "痛击"),
+    ("燃烧之血", "红头骨"),
+    ("打击（铁甲战士）", "防御（铁甲战士）"),
+)
 
 
 async def main():
@@ -48,7 +49,7 @@ async def main():
     with tempfile.TemporaryDirectory() as directory:
         cache = Cache(Path(directory))
         client = SpireCodexClient(cache, timeout=20)
-        chinese = ChineseGuideService(cache, timeout=20)
+        chinese = ChineseGuideService(cache, timeout=30)
         service = SpireCodexService(client, timeout=40, chinese=chinese)
         try:
             for name, question, expected in CASES:

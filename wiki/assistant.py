@@ -320,6 +320,16 @@ class CommandAssistant:
                     )
                     try:
                         body = (await generate(prompt)).strip()
+                        body = clean_overview(
+                            body,
+                            400,
+                            [
+                                {
+                                    "text": json.dumps(result, ensure_ascii=False),
+                                    "section": "对比",
+                                }
+                            ],
+                        )
                     except Exception:
                         body = ""
                         metrics["fallback"] = True

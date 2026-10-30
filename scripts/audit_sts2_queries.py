@@ -55,8 +55,13 @@ SEARCH_CASES = (
     ("删什么牌", "", "最常删除"),
     ("跳过奖励", "", "奖励跳过率"),
     ("深渊浴场", "选哪个", "社区选择"),
+    ("先古之民有哪些", "", "先古列表"),
 )
-COMPARE_CASES = (("燃烧", "痛击"), ("燃烧之血", "红头骨"))
+COMPARE_CASES = (
+    ("燃烧", "痛击"),
+    ("燃烧之血", "红头骨"),
+    ("打击（铁甲战士）", "防御（铁甲战士）"),
+)
 
 
 async def main(strict=False, threshold=0.8):
@@ -64,7 +69,7 @@ async def main(strict=False, threshold=0.8):
     with tempfile.TemporaryDirectory() as directory:
         cache = Cache(Path(directory))
         client = SpireCodexClient(cache, timeout=20)
-        chinese = ChineseGuideService(cache, timeout=20)
+        chinese = ChineseGuideService(cache, timeout=30)
         service = SpireCodexService(client, timeout=45, chinese=chinese)
         try:
             for query, question, expected in SEARCH_CASES:
