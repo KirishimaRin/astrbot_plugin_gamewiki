@@ -204,6 +204,40 @@ ENCOUNTERS = [
 MONSTERS = [
     {"id": "WRIGGLER", "name": "扭动虫", "type": "Elite", "min_hp": 10, "max_hp": 12}
 ]
+EPOCHS = [
+    {
+        "id": "SILENT1_EPOCH",
+        "title": "迷雾压境",
+        "description": "静默猎手的历史节点。",
+        "era_name": "门扉",
+        "unlock_info": "以铁甲战士完成一局游戏。",
+        "unlocks_cards": [],
+        "unlocks_relics": [],
+        "unlocks_potions": [],
+        "story_id": "SILENT",
+    }
+]
+STORIES = [{"id": "SILENT", "name": "静默猎手", "epochs": ["SILENT1_EPOCH"]}]
+MERCHANT_CONFIG = {
+    "card_removal": {
+        "base_cost": 75,
+        "price_increase": 25,
+        "inflation_ascension": {
+            "base_cost": 100,
+            "price_increase": 50,
+            "level": "Inflation",
+        },
+    },
+    "cards": {
+        "by_rarity": {
+            "Common": {"base": 50, "min": 48, "max": 52},
+            "Rare": {"base": 150, "min": 142, "max": 158},
+        }
+    },
+    "relics": {"by_rarity": {"Common": {"base": 175, "min": 149, "max": 201}}},
+    "potions": {"by_rarity": {"Common": {"base": 50, "min": 48, "max": 52}}},
+    "fake_merchant": {"relic_cost": 50},
+}
 EVENTS = [
     {
         "id": "ABYSSAL_BATHS",
@@ -547,6 +581,12 @@ def make_service(tmp_path, calls=None):
             )
         if path == "/api/ascensions":
             return httpx.Response(200, json=ASCENSIONS)
+        if path == "/api/epochs":
+            return httpx.Response(200, json=EPOCHS)
+        if path == "/api/stories":
+            return httpx.Response(200, json=STORIES)
+        if path == "/api/merchant/config":
+            return httpx.Response(200, json=MERCHANT_CONFIG)
         if path == "/api/acts":
             return httpx.Response(200, json=ACTS)
         if path == "/api/achievements":
@@ -972,3 +1012,31 @@ def test_event_choice_shows_community_share(tmp_path):
     assert "沉溺：59.5%" in text
     assert "离开浴场：14.4%" in text
     assert "仅供参考" in text
+
+
+def test_story_epoch_and_merchant_meta(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            story_list = await service.search("剧情", "")
+            story = await service.search("静默猎手剧情", "")
+            epoch = await service.search("迷雾压境 纪元", "")
+            merchant = await service.search("商店价格", "")
+            return story_list, story, epoch, merchant
+        finally:
+            await client.close()
+
+    story_list, story, epoch, merchant = asyncio.run(run())
+    assert story_list["status"] == "ok"
+    assert "故事线" in story_list["available_sections"]
+    assert "静默猎手" in "\n".join(item["text"] for item in story_list["evidence"])
+    assert story["status"] == "ok"
+    assert story["title"] == "静默猎手"
+    assert "迷雾压境" in "\n".join(item["text"] for item in story["evidence"])
+    assert epoch["status"] == "ok"
+    assert epoch["title"] == "迷雾压境"
+    assert "门扉" in "\n".join(item["text"] for item in epoch["evidence"])
+    assert merchant["status"] == "ok"
+    text = "\n".join(item["text"] for item in merchant["evidence"])
+    assert "75" in text and "100" in text

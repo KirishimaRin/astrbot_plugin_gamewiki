@@ -44,6 +44,10 @@ PATHS = {
     "act": "acts",
     "achievement": "achievements",
     "unlock": "unlocks",
+    "epoch": "epochs",
+    "story": "stories",
+    "ancient": "ancient-pools",
+    "merchant": "merchant/config",
 }
 
 # /api/search names the mechanics category "mechanics"; the adapter uses the
@@ -219,6 +223,12 @@ MOVE_INTENTS = {
     "Heal": "治疗",
 }
 POWER_TYPES = {"Buff": "增益", "Debuff": "减益"}
+RARITY_NAMES = {
+    "Common": "普通",
+    "Uncommon": "罕见",
+    "Rare": "稀有",
+    "Shop": "商店",
+}
 STACK_TYPES = {"Counter": "可叠加", "Single": "不可叠加"}
 GLOSSARY_CATEGORIES = {
     "combat": "战斗",
@@ -696,6 +706,46 @@ class SpireCodexService:
                 name = str(item.get("name", ""))
                 if name and name in text:
                     return await self._entry("unlock", item, question, "")
+        if any(word in text for word in ("商店", "价格", "商人", "删牌")):
+            try:
+                config = await self.client.get(
+                    "/api/merchant/config", {}, self.page_ttl
+                )
+            except WikiError:
+                config = {}
+            if isinstance(config, dict) and config:
+                return await self._entry(
+                    "merchant",
+                    {"id": "MERCHANT", "title": "商店", "config": config},
+                    question,
+                    "",
+                )
+        if any(word in text for word in ("剧情", "故事", "故事线", "纪元", "时间线")):
+            stories = await self._index("story", "zhs")
+            epochs = await self._index("epoch", "zhs")
+            story = next(
+                (item for item in stories if item.get("name") and item["name"] in text),
+                None,
+            )
+            if story is not None:
+                return await self._entry("story", story, question, "")
+            epoch = next(
+                (
+                    item
+                    for item in epochs
+                    if item.get("title") and item["title"] in text
+                ),
+                None,
+            )
+            if epoch is not None:
+                return await self._entry("epoch", epoch, question, "")
+            if stories and any(word in text for word in ("剧情", "故事", "故事线")):
+                return await self._entry(
+                    "story",
+                    {"id": "ALL", "name": "故事线", "stories": stories},
+                    question,
+                    "",
+                )
         act_intent = any(word in text for word in ("章", "幕", "精英", "BOSS", "boss"))
         act_index = self._act_from_text(text) if act_intent else None
         if act_index is not None:
@@ -1037,6 +1087,12 @@ class SpireCodexService:
             return f"{self.base}/zhs/mechanics/{str(key).lower()}"
         if kind == "unlock" or (kind == "achievement" and str(key) == "ALL"):
             return f"{self.base}/zhs/unlocks"
+        if kind in {"epoch", "story"}:
+            return f"{self.base}/zhs/timeline"
+        if kind == "ancient":
+            return f"{self.base}/zhs/ancients"
+        if kind == "merchant":
+            return f"{self.base}/zhs/merchant"
         return f"{self.base}/zhs/{PATHS[kind]}/{str(key).lower()}"
 
     def _image_url(self, kind, entity):
@@ -1093,6 +1149,11 @@ class SpireCodexService:
                 "title": "成就列表",
                 "achievements": await self._index("achievement", "zhs"),
             }
+        if kind == "merchant":
+            config = await self.client.get("/api/merchant/config", {}, self.page_ttl)
+            if str(key) != "MERCHANT" or not isinstance(config, dict):
+                return None
+            return {"id": "MERCHANT", "title": "商店", "config": config}
         data = await self.client.get(
             f"/api/{PATHS[kind]}/{str(key).lower()}", {"lang": "zhs"}, self.page_ttl
         )
@@ -1337,6 +1398,14 @@ class SpireCodexService:
             self._achievement_sections(entity, add)
         elif kind == "unlock":
             self._unlock_sections(entity, add)
+        elif kind == "epoch":
+            await self._epoch_sections(entity, add)
+        elif kind == "story":
+            await self._story_sections(entity, add)
+        elif kind == "ancient":
+            await self._ancient_sections(entity, add)
+        elif kind == "merchant":
+            self._merchant_sections(entity, add)
         else:
             self._generic_sections(kind, entity, add)
 
@@ -1680,6 +1749,8 @@ class SpireCodexService:
             )
 
     async def _names(self, kind, ids):
+        if not ids:
+            return []
         index = await self._index(kind, "zhs")
         by_id = {item.get("id"): item.get("name", "") for item in index}
         return [by_id.get(self._normalize_id(raw), str(raw)) for raw in ids]
@@ -1828,6 +1899,132 @@ class SpireCodexService:
         add("基本信息", [*info, unlock])
         if unlock:
             add("解锁条件", [unlock])
+
+    async def _epoch_sections(self, entity, add):
+        info = []
+        for field, label in (
+            ("title", "名称"),
+            ("era_name", "时代"),
+            ("era_year", "年份"),
+            ("unlock_info", "解锁方式"),
+        ):
+            if entity.get(field):
+                info.append(f"{label}：{clean(entity[field])}")
+        add("基本信息", info)
+        description = clean(entity.get("description") or "")
+        if description:
+            add("故事", [description])
+        lines = []
+        cards = await self._names("card", entity.get("unlocks_cards") or [])
+        relics = await self._names("relic", entity.get("unlocks_relics") or [])
+        potions = await self._names("potion", entity.get("unlocks_potions") or [])
+        for label, values in (
+            ("卡牌", cards),
+            ("遗物", relics),
+            ("药水", potions),
+        ):
+            if values:
+                lines.append(f"{label}：" + "、".join(values))
+        if lines:
+            add("解锁内容", lines)
+
+    async def _story_sections(self, entity, add):
+        stories = entity.get("stories")
+        if isinstance(stories, list):
+            add(
+                "基本信息",
+                [
+                    f"名称：{entity.get('name', '')}",
+                    "包含故事线："
+                    + "、".join(item.get("name", "") for item in stories),
+                ],
+            )
+            add(
+                "故事线",
+                [
+                    f"{item.get('name', '')}（{len(item.get('epochs') or [])} 个纪元）"
+                    for item in stories
+                ],
+            )
+            return
+        epochs = await self._index("epoch", "zhs")
+        wanted = set(entity.get("epochs") or [])
+        matched = [item for item in epochs if item.get("id") in wanted]
+        info = [f"名称：{entity.get('name', '')}"]
+        if matched:
+            info.append(
+                "包含纪元：" + "、".join(item.get("title", "") for item in matched)
+            )
+        add("基本信息", info)
+        lines = [
+            f"{item.get('title', '')}：{clean(item.get('description') or '')[:180]}"
+            for item in matched
+        ]
+        if lines:
+            add("故事线", lines)
+
+    async def _ancient_sections(self, entity, add):
+        info = []
+        for field, label in (
+            ("name", "名称"),
+            ("description", "说明"),
+            ("selection", "选择规则"),
+        ):
+            if entity.get(field):
+                info.append(f"{label}：{clean(entity[field])}")
+        add("基本信息", info)
+        for pool in entity.get("pools") or []:
+            relics = pool.get("relics") or []
+            names = await self._names(
+                "relic", [item.get("id") for item in relics if isinstance(item, dict)]
+            )
+            lines = []
+            for name, relic in zip(
+                names, [item for item in relics if isinstance(item, dict)]
+            ):
+                condition = clean(relic.get("condition") or "")
+                lines.append(f"{name}（{condition}）" if condition else name)
+            if lines:
+                add("遗物池 / " + str(pool.get("name", "")), lines)
+
+    def _merchant_sections(self, entity, add):
+        config = entity.get("config") or {}
+        removal = config.get("card_removal") or {}
+        if isinstance(removal, dict):
+            base = removal.get("base_cost")
+            increase = removal.get("price_increase")
+            inflation = removal.get("inflation_ascension") or {}
+            lines = []
+            if base is not None:
+                lines.append(f"基础删牌：{base} 金")
+            if increase is not None:
+                lines.append(f"之后每张递增：{increase} 金")
+            if isinstance(inflation, dict) and inflation.get("base_cost") is not None:
+                lines.append(
+                    f"进阶通胀：起价 {inflation['base_cost']} 金，"
+                    f"每张递增 {inflation.get('price_increase', '?')} 金"
+                )
+            if lines:
+                add("删牌服务", lines)
+        for field, label in (
+            ("cards", "卡牌"),
+            ("relics", "遗物"),
+            ("potions", "药水"),
+        ):
+            rows = (config.get(field) or {}).get("by_rarity") or {}
+            lines = []
+            for rarity, value in rows.items():
+                if isinstance(value, dict) and value.get("base") is not None:
+                    lines.append(
+                        f"{RARITY_NAMES.get(rarity, rarity)}："
+                        f"{value.get('min', '?')}–{value.get('max', '?')} 金"
+                        f"（基准 {value['base']}）"
+                    )
+            if lines:
+                add(label + "价格", lines)
+        fake = config.get("fake_merchant") or {}
+        if isinstance(fake, dict) and fake.get("relic_cost") is not None:
+            add("假商人", [f"遗物价格：{fake['relic_cost']} 金"])
 
     def _guide_sections(self, entity, add):
         info = []
