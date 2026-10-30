@@ -42,6 +42,7 @@ class WikiClient:
             "bwiki": "BWIKI",
             "akedata": "AKEData",
             "spirecodex": "Spire Codex",
+            "kurobbs": "库街区",
         }.get(self.source, self.source)
         self.api = source_api(game, self.source)
         self._host = httpx.URL(self.api).host
@@ -49,7 +50,8 @@ class WikiClient:
             timeout=timeout,
             follow_redirects=False,
             headers={
-                "User-Agent": f"AstrBot-GameWiki/{VERSION} ({self.source_name} lookup)"
+                # Header values must stay ASCII; source_name may be Chinese.
+                "User-Agent": f"AstrBot-GameWiki/{VERSION} ({self.source} lookup)"
             },
             transport=transport,
         )

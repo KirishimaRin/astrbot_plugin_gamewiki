@@ -66,6 +66,12 @@
     "default": "https://cdn.spire-codex.com",
     "hint": "角色立绘等图片地址；自建实例未托管图片时可改为自有 CDN。留空使用官方 CDN"
   },
+  "kuro_bbs_base": {
+    "description": "库街区接口地址",
+    "type": "string",
+    "default": "https://api.kurobbs.com",
+    "hint": "鸣潮主数据源（库街区官方 wiki）的 API 根地址；留空使用官方地址。搜索异常时自动回退 BWIKI"
+  },
   "sts2_chinese_sources": {
     "description": "杀戮尖塔2 中文攻略/机制源",
     "type": "bool",

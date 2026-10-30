@@ -84,3 +84,9 @@ class EndfieldSources(SourceRouter):
     primary_source = "akedata"
     game = "zmd"
     game_name = "终末地"
+
+
+class WuwaSources(SourceRouter):
+    primary_source = "kurobbs"
+    game = "ww"
+    game_name = "鸣潮"

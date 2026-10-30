@@ -301,6 +301,20 @@
 - 游戏代码建议 `ww`，不要用库街区内部 key `mc`（与 Minecraft 混淆）。
 - 本次仅调研，未改运行逻辑。
 
+## 鸣潮接入实现（2026-10-30，分支 `feature/wuthering-waves-wiki`）
+
+- 双源分工：`KuroBbsService`（库街区官方，主源）+ BWIKI `wutheringwaves`（兜底），路由 `WuwaSources`。库街区没有等级属性表/共鸣链表/生日 CV 模板数据：这些问法（`_BWIKI_ONLY_SECTIONS`）以及证据处于 fallback 模式的问法一律返回 `section_not_found`，由路由落到 BWIKI；两源分节名经 `MODULE_TITLES` 映射到同一词汇（角色养成→技能详情、角色养成推荐→养成推荐等），一份 WW intents/specifics 同时服务两源。
+- 库街区 wire 契约（均已实测）：POST 表单、头 `wiki_type: 9` + `source: h5`；search 参数是 `keyword`；详情 id 是 `content.linkId` 雪花ID，且**响应里是字符串形态**，必须 `int()` 转换；错误码 2031=词条不存在（映射 not_found）。UA 头不能含中文（httpx ASCII 校验），User-Agent 用 ASCII 的 source 键。
+- 搜索卡片标题不带形态后缀，后缀（（声骸）/（敌人））只在详情标题里：同名多候选时先 `_probe_titles` 探测前三个详情标题（走 client 缓存，重复查询零成本），再按问法选——问句含 声骸/敌人 类词按后缀优先，裸名称默认敌人本体优先。探测失败的候选（如“头像『今汐』”详情标题不剥离后不等于查询词）自动排除。
+- 精确名比较剥标题末尾的（…）括注（`玉冥蛇（声骸）` 命中裸“玉冥蛇”），展示保留全称。
+- `page_id` 即雪花ID（int64 内），Python json 解析无损；不要把 linkId 当 BWIKI pageid 跨源读。
+- evidence 通用改动：`fields` 现在只从“本页确有对应分节”的 contributing 意图行取（此前从全部触发行取），否则全局“获取”行的字段过滤会把只有「概览」分节的道具页正文滤成空。该行为对所有游戏生效，既有测试全过。
+- `QueryService._match_key`：title_namespaces 非空时精确匹配按“恰好一段前缀”的末段比较（`共鸣者/今汐` 命中裸“今汐”，`共鸣者/今汐/语音` 不命中）；子页流程（guide_suffix 与新 `sub_pages`）对带前缀标题先剥前缀再判断，鸣潮与原神的 `/语音` 子页共用该机制（原神「胡桃语音」不再消耗重试模型调用，直接读语音子页）。
+- UP记录聚合页只记录到 2.0（条目自带“计划后续补全”提示）：卡池问法重定向到该页按表回答，不虚构当前 UP；当前池覆盖依赖站点补全或后续接库街区活动合集。
+- BWIKI WAF 对连发敏感（567/超时）：审计脚本用持久缓存 `research/ww-cache/` + 用例间 2 秒间隔 + 单例退避重试；CI 冷跑保持诊断性质。
+- 验证：pytest 442 passed；Ruff 通过；smoke_ww 11/11；audit_ww_queries 39/39（库街区主源 26 例 + BWIKI 兜底 13 例，含官方养成推荐、属性表回退、UP记录、繁简与容错）。未改版本号。
+- 已知限制：BWIKI 鸣潮站部分新内容缺失（如“碧海绿萝”武器页 404）；武器突破材料表在 BWIKI 只有数字无材料名（图标丢失），库街区有完整名称；UP记录滞后。
+
 ## v0.4.0 版本（杀戮尖塔2接入与文档整理）
 
 - VERSION、metadata、README 与 CHANGELOG 同步为 v0.4.0。

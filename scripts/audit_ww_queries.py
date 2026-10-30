@@ -1,8 +1,9 @@
-"""Read-only BWIKI Wuthering Waves user-question coverage audit.
+"""Read-only Wuthering Waves user-question coverage audit.
 
-Runs representative player questions against the live BWIKI wutheringwaves
-site and reports whether each reaches a useful status/section. Default is
-diagnostic (exit 0); pass --strict to fail below the threshold.
+Runs representative player questions against the live 库街区 official wiki
+(KuroBBS, primary) with BWIKI wutheringwaves as the pinned fallback, and
+reports whether each reaches a useful status/section. Default is diagnostic
+(exit 0); pass --strict to fail below the threshold.
 """
 
 import argparse
@@ -16,7 +17,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from wiki.cache import Cache  # noqa: E402
 from wiki.client import WikiClient  # noqa: E402
 from wiki.games import PROFILES  # noqa: E402
+from wiki.kurobbs import KuroBbsClient, KuroBbsService  # noqa: E402
 from wiki.query import QueryService  # noqa: E402
+from wiki.sources import WuwaSources  # noqa: E402
 
 # Reuse parsed pages across runs: cold fetches occasionally trip the BWIKI
 # WAF, which reads as a false coverage failure. Lives in gitignored research/.
@@ -56,13 +59,21 @@ SEARCH_CASES = (
     ("无妄者", "声骸", "声骸"),
     # —— 敌人 ——
     ("无妄者", "怎么打", "无妄者"),
-    ("无妄者", "", "关联声骸"),
+    ("无妄者", "", "关于无妄者"),
     # —— 道具 ——
     ("贝币", "怎么获得", "贝币"),
     ("贝币", "", "贝币"),
     # —— 卡池 ——
     ("现在UP什么", "", "UP记录"),
     ("复刻", "", "UP记录"),
+    # —— 库街区主源（官方攻略）——
+    ("今汐", "声骸搭配", "声骸"),
+    ("今汐", "武器推荐", "时和岁稔"),
+    ("今汐", "配队推荐", "配队"),
+    ("卡卡罗", "技能加点", "养成推荐"),
+    # —— 回退 BWIKI（等级属性表/突破总消耗在 BWIKI 模板里）——
+    ("卡卡罗", "90级面板", "基础属性"),
+    ("今汐", "突破材料", "基础属性"),
     # —— 容错 ——
     ("鸣潮知识不存在测试词", "", "未找到"),
 )
@@ -72,8 +83,13 @@ async def main(strict=False, threshold=0.8):
     records, passed = [], 0
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     cache = Cache(CACHE_DIR)
-    client = WikiClient(cache, timeout=15, game="ww", source="bwiki")
-    service = QueryService(client, profile=PROFILES["ww"])
+    kuro = KuroBbsClient(cache, timeout=15)
+    kuro_service = KuroBbsService(kuro, timeout=30)
+    bwiki = QueryService(
+        WikiClient(cache, timeout=15, game="ww", source="bwiki"),
+        profile=PROFILES["ww"],
+    )
+    service = WuwaSources(kuro_service, bwiki, timeout=40)
     try:
         for query, question, expected in SEARCH_CASES:
             try:
@@ -134,7 +150,7 @@ async def main(strict=False, threshold=0.8):
             # BWIKI 的 WAF 对高频请求敏感；用例间稍作停顿。
             await asyncio.sleep(2.0)
     finally:
-        await client.close()
+        await kuro.close()
 
     total = len(records)
     rate = passed / total if total else 0.0

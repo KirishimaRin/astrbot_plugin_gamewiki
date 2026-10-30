@@ -569,6 +569,13 @@ WW = GameProfile(
         ),
         # 武器页「可用角色」承接“给谁用/适合谁”。
         (("谁用", "适合谁", "给谁", "推荐角色"), ("可用角色",), ()),
+        # 库街区词条的「养成推荐」模块（武器推荐/声骸推荐/配队推荐/技能
+        # 加点）；BWIKI 无该分节，行不贡献即不生效。
+        (
+            ("推荐", "搭配", "配队", "配装", "词条", "强度", "怎么选", "毕业"),
+            ("养成推荐",),
+            (),
+        ),
         # 道具页只有「概览」一个分节：获取类问法的全局行字段过滤会滤空
         # 纯介绍正文，这里按标题选中概览且不做字段过滤。
         (("获取", "哪里", "在哪", "怎么获得", "用途", "是什么"), ("概览",), ()),
@@ -583,6 +590,7 @@ WW = GameProfile(
         (("出招", "连招", "操作"), "出招说明"),
         (("档案", "身世", "背景故事"), "档案"),
         (("语音", "台词"), "语音"),
+        (("推荐", "搭配", "配队", "配装", "词条", "强度", "加点"), "养成推荐"),
         (("突破材料", "养成材料", "突破消耗", "培养材料"), ("基础属性", "突破数值")),
     ),
     slang=(
@@ -779,6 +787,8 @@ def source_api(code: str, source: str) -> str:
         return "https://prts.wiki/api.php"
     if source == "spirecodex" and code == "sts2":
         return "https://spire-codex.com"
+    if source == "kurobbs" and code == "ww":
+        return "https://api.kurobbs.com"
     if code == "ww" and source == "bwiki":
         # 鸣潮站前缀不是游戏代码：BWIKI 站名为 wutheringwaves。
         return "https://wiki.biligame.com/wutheringwaves/api.php"

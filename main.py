@@ -21,8 +21,9 @@ from .wiki.images import prepared_image
 from .wiki.limits import Limiter
 from .wiki.models import WikiError
 from .wiki.query import QueryService
-from .wiki.sources import ArknightsSources, EndfieldSources
+from .wiki.sources import ArknightsSources, EndfieldSources, WuwaSources
 from .wiki.akedata import AkeClient, AkeService
+from .wiki.kurobbs import KuroBbsClient, KuroBbsService
 from .wiki.spirecodex import SpireCodexClient, SpireCodexService
 from .wiki.chineseguides import ChineseGuideService
 
@@ -65,6 +66,7 @@ class GameWiki(Star):
         # 杀戮尖塔2 可切换到自建 Spire Codex 实例；空串使用官方地址。
         self.spire_codex_base = str(config.get("spire_codex_base", "") or "").strip()
         self.spire_codex_cdn = str(config.get("spire_codex_cdn", "") or "").strip()
+        self.kuro_bbs_base = str(config.get("kuro_bbs_base", "") or "").strip()
         self.sts2_chinese_sources = bool(config.get("sts2_chinese_sources", True))
         self.sts2_chinese_timeout = number("sts2_chinese_timeout_seconds", 20, 5, 60)
         self.model_fallback_hits = 0
@@ -94,7 +96,11 @@ class GameWiki(Star):
         self.cache = cache
         self.services: dict[
             str,
-            QueryService | ArknightsSources | EndfieldSources | SpireCodexService,
+            QueryService
+            | ArknightsSources
+            | EndfieldSources
+            | SpireCodexService
+            | WuwaSources,
         ] = {}
         self.clients: list[WikiClient | ChineseGuideService] = []
         self._image_slots = asyncio.Semaphore(2)
@@ -178,6 +184,28 @@ class GameWiki(Star):
                     base=self.spire_codex_base,
                     cdn=self.spire_codex_cdn,
                     chinese=chinese,
+                )
+            elif code == "ww":
+                client = KuroBbsClient(
+                    cache,
+                    number("timeout_seconds", 8, 2, 15),
+                    concurrency=int(number("upstream_concurrency", 2, 1, 8)),
+                    pace=number("upstream_pace_seconds", 0.3, 0.1, 2),
+                    base=self.kuro_bbs_base,
+                )
+                self.clients.append(client)
+                primary = KuroBbsService(
+                    client,
+                    aliases={**global_aliases, **game_aliases.get(code, {})},
+                    timeout=number("query_timeout_seconds", 15, 5, 30),
+                    search_ttl=number("search_cache_seconds", 600, 0, 3600),
+                    page_ttl=number("page_cache_seconds", 21600, 0, 86400),
+                    max_chars=int(number("max_evidence_chars", 6000, 1000, 8000)),
+                )
+                self.services[code] = WuwaSources(
+                    primary,
+                    build_service(code, "bwiki"),
+                    timeout=number("query_timeout_seconds", 15, 5, 30),
                 )
             else:
                 self.services[code] = build_service(code, "bwiki")
@@ -749,12 +777,12 @@ class GameWiki(Star):
                     "message": "杀戮尖塔2补读请留空 source 或填写 spirecodex。",
                 }
             return await self._run(service.read, page_id, question, section)
-        if game in {"arknights", "zmd"} or source:
+        if game in {"arknights", "zmd", "ww"} or source:
 
             async def read_from_source():
-                if game not in {"arknights", "zmd"} and source != "bwiki":
+                if game not in {"arknights", "zmd", "ww"} and source != "bwiki":
                     raise WikiError("bad_input", "该游戏仅支持 bwiki 来源。")
-                if game in {"arknights", "zmd"}:
+                if game in {"arknights", "zmd", "ww"}:
                     return await service.read(page_id, question, section, source=source)
                 return await service.read(page_id, question, section)
 
