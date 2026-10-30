@@ -32,6 +32,7 @@ CASES = (
     ("伤害怎么计算", "", "正文"),
     ("静默猎手", "攻略", "攻略"),
 )
+COMPARE_CASES = (("燃烧", "痛击"), ("燃烧之血", "红头骨"))
 
 
 async def main():
@@ -74,6 +75,31 @@ async def main():
                         {
                             "query": name,
                             "question": question,
+                            "error": f"{type(exc).__name__}: {exc}",
+                            "ok": False,
+                        }
+                    )
+            for left, right in COMPARE_CASES:
+                try:
+                    result = await service.compare(left, right)
+                    ok = result.get("status") == "compare" and bool(
+                        result.get("dimensions")
+                    )
+                    if not ok:
+                        failed = True
+                    records.append(
+                        {
+                            "query": f"{left} vs {right}",
+                            "status": result.get("status"),
+                            "dimensions": len(result.get("dimensions") or []),
+                            "ok": ok,
+                        }
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    failed = True
+                    records.append(
+                        {
+                            "query": f"{left} vs {right}",
                             "error": f"{type(exc).__name__}: {exc}",
                             "ok": False,
                         }

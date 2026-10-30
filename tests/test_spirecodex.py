@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from wiki.cache import Cache
-from wiki.formatter import format_command
+from wiki.formatter import format_command, format_compare
 from wiki.games import default_source, source_api
 from wiki.models import WikiError
 from wiki.spirecodex import (
@@ -71,7 +71,16 @@ RELICS = [
         "pool": "ironclad",
         "merchant_price": None,
         "image_url": "/static/images/relics/burning_blood.webp",
-    }
+    },
+    {
+        "id": "RED_SKULL",
+        "name": "红头骨",
+        "description": "生命值低于50%时，获得3点力量。",
+        "rarity": "普通",
+        "pool": "ironclad",
+        "merchant_price": 150,
+        "image_url": "/static/images/relics/red_skull.webp",
+    },
 ]
 CHARACTERS = [
     {
@@ -169,6 +178,51 @@ SEARCH = {
                         "name": "Combat Mechanics",
                         "path": "/mechanics/combat-mechanics",
                         "subtitle": "mechanics",
+                    }
+                ],
+            }
+        ],
+    },
+    "红头骨": {
+        "query": "红头骨",
+        "categories": [
+            {
+                "kind": "relic",
+                "items": [
+                    {
+                        "name": "红头骨",
+                        "path": "/relics/red_skull",
+                        "subtitle": "普通遗物 · ironclad",
+                    }
+                ],
+            }
+        ],
+    },
+    "重击": {
+        "query": "重击",
+        "categories": [
+            {
+                "kind": "card",
+                "items": [
+                    {
+                        "name": "重击",
+                        "path": "/cards/bash",
+                        "subtitle": "ironclad · 攻击 · 基础",
+                    }
+                ],
+            }
+        ],
+    },
+    "防御": {
+        "query": "防御",
+        "categories": [
+            {
+                "kind": "card",
+                "items": [
+                    {
+                        "name": "防御",
+                        "path": "/cards/defend_ironclad",
+                        "subtitle": "ironclad · 技能 · 基础",
                     }
                 ],
             }
@@ -347,6 +401,32 @@ def make_service(tmp_path, calls=None):
         if path == "/api/runs/scores/cards":
             return httpx.Response(
                 200, json={"INFLAME": {"win_rate": 43.6, "picks": 100, "score": 80}}
+            )
+        if path == "/api/runs/scores/relics":
+            return httpx.Response(
+                200,
+                json={
+                    "BURNING_BLOOD": {
+                        "win_rate": 40.0,
+                        "picks": 100,
+                        "score": 70,
+                    },
+                    "RED_SKULL": {"win_rate": 50.0, "picks": 80, "score": 80},
+                },
+            )
+        if path == "/api/runs/community-stats":
+            return httpx.Response(
+                200,
+                json={
+                    "by_character": [
+                        {
+                            "id": "ironclad",
+                            "win_rate": 27.3,
+                            "share": 23.0,
+                            "runs": 517627,
+                        }
+                    ]
+                },
             )
         if path == "/api/guides":
             return httpx.Response(200, json=GUIDES)
@@ -645,3 +725,70 @@ def test_read_rejects_foreign_ids_and_sources(tmp_path):
             await client.close()
 
     asyncio.run(run())
+
+
+def test_compare_two_relics_returns_dimensions_and_metrics(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            return await service.compare("燃烧之血", "红头骨")
+        finally:
+            await client.close()
+
+    result = asyncio.run(run())
+    assert result["status"] == "compare"
+    assert result["kind"] == "relic"
+    labels = [item["label"] for item in result["dimensions"]]
+    assert "稀有度" in labels and "效果" in labels
+    assert result["left"]["metrics"]["win_rate"] == 40.0
+    assert result["right"]["metrics"]["win_rate"] == 50.0
+
+
+def test_compare_two_cards(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            return await service.compare("重击", "防御")
+        finally:
+            await client.close()
+
+    result = asyncio.run(run())
+    assert result["status"] == "compare"
+    assert result["kind"] == "card"
+    labels = [item["label"] for item in result["dimensions"]]
+    assert "费用" in labels and "效果" in labels
+
+
+def test_compare_cross_kind_and_ambiguous_are_explained(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            cross = await service.compare("燃烧之血", "重击")
+            ambiguous = await service.compare("打击", "防御")
+            return cross, ambiguous
+        finally:
+            await client.close()
+
+    cross, ambiguous = asyncio.run(run())
+    assert cross["status"] == "compare_unsupported"
+    assert "类型不同" in format_compare(cross)
+    assert ambiguous["status"] == "compare_unavailable"
+    assert "分开查询" in format_compare(ambiguous)
+
+
+def test_format_compare_renders_data_and_sources(tmp_path):
+    service, client, _ = make_service(tmp_path)
+
+    async def run():
+        try:
+            return await service.compare("燃烧之血", "红头骨")
+        finally:
+            await client.close()
+
+    text = format_compare(asyncio.run(run()))
+    assert "【对比】燃烧之血 vs 红头骨" in text
+    assert "稀有度" in text and "｜" in text
+    assert "社区数据" in text and "来源" in text

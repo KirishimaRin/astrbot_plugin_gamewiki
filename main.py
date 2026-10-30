@@ -804,6 +804,54 @@ class GameWiki(Star):
         result = await self._tool_read(event, page_id, section, question, game, source)
         return json.dumps(result, ensure_ascii=False)
 
+    @filter.llm_tool(name="wiki_compare")
+    async def wiki_compare(
+        self,
+        event: AstrMessageEvent,
+        query_a: str,
+        query_b: str,
+        question: str,
+        game: str = "sts2",
+    ) -> str:
+        """对比两个同类型游戏条目，返回字段差异和社区数据。
+
+        目前仅支持杀戮尖塔2（sts2）；用于“A和B哪个好”“A对比B”等问题。
+
+        Args:
+            query_a(string): 第一个条目名称。
+            query_b(string): 第二个条目名称。
+            question(string): 用户的完整问题，用于判断是否需要进一步解释。
+            game(string): 游戏代码，目前仅支持 sts2。
+        """
+        if not self._allowed(event):
+            return json.dumps(
+                {
+                    "status": "error",
+                    "code": "disabled",
+                    "message": "当前会话未启用百科查询。",
+                },
+                ensure_ascii=False,
+            )
+        service = self.services.get(game)
+        if game != "sts2" or service is None or not hasattr(service, "compare"):
+            return json.dumps(
+                {
+                    "status": "error",
+                    "code": "unsupported",
+                    "message": "wiki_compare 目前仅支持 game=sts2。",
+                },
+                ensure_ascii=False,
+            )
+        try:
+            self._limited(event)
+        except WikiError as exc:
+            return json.dumps(
+                {"status": "error", "code": exc.code, "message": str(exc)},
+                ensure_ascii=False,
+            )
+        result = await self._run(service.compare, query_a, query_b, question)
+        return json.dumps(result, ensure_ascii=False)
+
     @filter.llm_tool(name="genshin_wiki_search")
     async def genshin_wiki_search(
         self, event: AstrMessageEvent, query: str, question: str

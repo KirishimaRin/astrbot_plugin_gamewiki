@@ -574,3 +574,96 @@ class TestUnknownTailRetry(unittest.IsolatedAsyncioTestCase):
         )
         assert service.search.await_count == 1
         generate.assert_not_awaited()
+
+
+class TestSTS2Comparison(unittest.IsolatedAsyncioTestCase):
+    async def test_sts2_comparison_uses_field_data(self):
+        service, generate = Service(), AsyncMock()
+        service.compare = AsyncMock(
+            return_value={
+                "status": "compare",
+                "game": "sts2",
+                "kind": "relic",
+                "query": "燃烧之血 vs 红头骨",
+                "left": {
+                    "title": "燃烧之血",
+                    "url": "https://example.test/a",
+                    "metrics": {"win_rate": 40.0},
+                },
+                "right": {
+                    "title": "红头骨",
+                    "url": "https://example.test/b",
+                    "metrics": {"win_rate": 50.0},
+                },
+                "dimensions": [
+                    {"label": "稀有度", "left": "初始遗物", "right": "普通"}
+                ],
+                "source_urls": ["https://example.test/a", "https://example.test/b"],
+            }
+        )
+        reply, metrics = await CommandAssistant(generate).answer(
+            "燃烧之血和红头骨哪个好", PROFILES["sts2"], service
+        )
+        service.compare.assert_awaited_once()
+        assert "【对比】燃烧之血 vs 红头骨" in reply
+        assert "稀有度" in reply and "社区数据" in reply
+        generate.assert_not_awaited()
+        assert metrics["outcome"] == "comparison"
+
+    async def test_sts2_comparison_with_why_adds_model_narrative(self):
+        service, generate = (
+            Service(),
+            AsyncMock(return_value="需要低血量爆发时，红头骨更合适。"),
+        )
+        service.compare = AsyncMock(
+            return_value={
+                "status": "compare",
+                "game": "sts2",
+                "kind": "relic",
+                "query": "燃烧之血 vs 红头骨",
+                "left": {"title": "燃烧之血", "url": "a", "metrics": {}},
+                "right": {"title": "红头骨", "url": "b", "metrics": {}},
+                "dimensions": [
+                    {"label": "稀有度", "left": "初始遗物", "right": "普通"}
+                ],
+                "source_urls": ["a", "b"],
+            }
+        )
+        reply, metrics = await CommandAssistant(generate).answer(
+            "燃烧之血和红头骨哪个好为什么", PROFILES["sts2"], service
+        )
+        assert "【对比】" in reply and "红头骨更合适" in reply
+        generate.assert_awaited_once()
+        assert metrics["model_calls"] == 1
+
+    async def test_sts2_equal_ascension_spellings_are_explained(self):
+        service, generate = Service(), AsyncMock()
+        reply, metrics = await CommandAssistant(generate).answer(
+            "A10和N10有什么区别", PROFILES["sts2"], service
+        )
+        service.compare.assert_not_awaited() if hasattr(service, "compare") else None
+        assert "同一条目/等级" in reply and "进阶10" in reply
+        generate.assert_not_awaited()
+        assert metrics["outcome"] == "comparison"
+
+    async def test_sts2_difference_question_uses_comparison(self):
+        service, generate = Service(), AsyncMock()
+        service.compare = AsyncMock(
+            return_value={
+                "status": "compare",
+                "game": "sts2",
+                "kind": "relic",
+                "query": "燃烧之血 vs 红头骨",
+                "left": {"title": "燃烧之血", "url": "a", "metrics": {}},
+                "right": {"title": "红头骨", "url": "b", "metrics": {}},
+                "dimensions": [
+                    {"label": "稀有度", "left": "初始遗物", "right": "普通"}
+                ],
+                "source_urls": ["a", "b"],
+            }
+        )
+        reply, _ = await CommandAssistant(generate).answer(
+            "燃烧之血和红头骨有什么区别", PROFILES["sts2"], service
+        )
+        service.compare.assert_awaited_once()
+        assert "【对比】" in reply and "稀有度" in reply

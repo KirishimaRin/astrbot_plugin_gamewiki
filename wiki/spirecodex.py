@@ -419,6 +419,226 @@ class SpireCodexService:
                 "invalid_response", "Spire Codex 数据结构发生变化，请稍后重试。"
             ) from None
 
+    async def compare(self, query_a, query_b, question=""):
+        """Compare two same-kind entities with deterministic field data."""
+        for query in (query_a, query_b):
+            if not isinstance(query, str) or not query.strip() or len(query) > 100:
+                raise WikiError("bad_input", "请输入两个 1–100 字的条目名称。")
+        self._validate(question)
+        return await self._guard(
+            self._compare(query_a.strip(), query_b.strip(), question)
+        )
+
+    async def _compare(self, query_a, query_b, question):
+        left = await self._search(query_a, "")
+        right = await self._search(query_b, "")
+        base = {
+            "game": "sts2",
+            "command": "sts2",
+            "query": f"{query_a} vs {query_b}",
+        }
+        if left.get("status") != "ok" or right.get("status") != "ok":
+            return {
+                **base,
+                "status": "compare_unavailable",
+                "message": "有一边没有精确命中条目，请先分别确认名称。",
+                "left": {"query": query_a, "status": left.get("status")},
+                "right": {"query": query_b, "status": right.get("status")},
+            }
+        kind_a = KIND_BY_CODE.get(left.get("page_id", 0) >> 48)
+        kind_b = KIND_BY_CODE.get(right.get("page_id", 0) >> 48)
+        if kind_a != kind_b or kind_a not in {"card", "relic", "character"}:
+            return {
+                **base,
+                "status": "compare_unsupported",
+                "message": "这两个条目类型不同，不能直接逐项对比；请分别查看。",
+                "left": {"title": left.get("title"), "url": left.get("url")},
+                "right": {"title": right.get("title"), "url": right.get("url")},
+            }
+        entity_a = await self._entity(left["page_id"])
+        entity_b = await self._entity(right["page_id"])
+        if entity_a is None or entity_b is None:
+            return {
+                **base,
+                "status": "compare_unavailable",
+                "message": "无法读取其中一个条目的完整数据，请稍后重试。",
+                "left": {"title": left.get("title"), "url": left.get("url")},
+                "right": {"title": right.get("title"), "url": right.get("url")},
+            }
+        dimensions = await self._compare_dimensions(kind_a, entity_a, entity_b)
+        metrics = await self._compare_metrics(kind_a, entity_a, entity_b)
+        return {
+            **base,
+            "status": "compare",
+            "kind": kind_a,
+            "left": {
+                "title": left.get("title"),
+                "page_id": left.get("page_id"),
+                "url": left.get("url"),
+                "metrics": metrics.get("left", {}),
+            },
+            "right": {
+                "title": right.get("title"),
+                "page_id": right.get("page_id"),
+                "url": right.get("url"),
+                "metrics": metrics.get("right", {}),
+            },
+            "dimensions": dimensions,
+            "source_urls": [left.get("url"), right.get("url")],
+            "context": {
+                "left": {
+                    "title": left.get("title"),
+                    "effect": effect_text(entity_a)[:600],
+                },
+                "right": {
+                    "title": right.get("title"),
+                    "effect": effect_text(entity_b)[:600],
+                },
+            },
+        }
+
+    async def _entity(self, page_id):
+        known = self._known.get(page_id)
+        if known:
+            return await self._detail(*known)
+        kind = KIND_BY_CODE.get(page_id >> 48)
+        if kind is None:
+            return None
+        for item in await self._index(kind, "zhs"):
+            if entry_id(kind, item.get("id", "")) == page_id:
+                return item
+        return None
+
+    @staticmethod
+    def _compare_text(value):
+        if value is None:
+            return "—"
+        if isinstance(value, bool):
+            return "是" if value else "否"
+        if isinstance(value, dict):
+            if "min" in value and "max" in value:
+                base = (
+                    f"（基准{value['base']}）" if value.get("base") is not None else ""
+                )
+                return f"{value['min']}–{value['max']}{base}"
+            return "、".join(f"{key}:{item}" for key, item in value.items())
+        if isinstance(value, (list, tuple)):
+            value = "、".join(str(item) for item in value if item)
+        text = str(value).replace("\n", " / ").strip()
+        return text or "—"
+
+    async def _compare_dimensions(self, kind, left, right):
+        if kind == "card":
+
+            def cost(entity):
+                if entity.get("is_x_cost"):
+                    return "X"
+                return entity.get("cost")
+
+            rows = (
+                ("类型", left.get("type"), right.get("type")),
+                ("稀有度", left.get("rarity"), right.get("rarity")),
+                ("费用", cost(left), cost(right)),
+                (
+                    "目标",
+                    TARGETS.get(left.get("target"), left.get("target")),
+                    TARGETS.get(right.get("target"), right.get("target")),
+                ),
+                (
+                    "角色",
+                    CHARACTERS.get(left.get("color"), left.get("color")),
+                    CHARACTERS.get(right.get("color"), right.get("color")),
+                ),
+                ("关键词", left.get("keywords"), right.get("keywords")),
+                ("伤害", left.get("damage"), right.get("damage")),
+                ("格挡", left.get("block"), right.get("block")),
+                ("效果", effect_text(left)[:180], effect_text(right)[:180]),
+                (
+                    "升级后",
+                    clean(left.get("upgrade_description") or "")[:180],
+                    clean(right.get("upgrade_description") or "")[:180],
+                ),
+            )
+        elif kind == "relic":
+            rows = (
+                ("稀有度", left.get("rarity"), right.get("rarity")),
+                (
+                    "池",
+                    CHARACTERS.get(left.get("pool"), left.get("pool")),
+                    CHARACTERS.get(right.get("pool"), right.get("pool")),
+                ),
+                ("商店价格", left.get("merchant_price"), right.get("merchant_price")),
+                ("效果", effect_text(left)[:180], effect_text(right)[:180]),
+                (
+                    "风味",
+                    clean(left.get("flavor") or "")[:120],
+                    clean(right.get("flavor") or "")[:120],
+                ),
+            )
+        else:
+            left_relics = await self._names("relic", left.get("starting_relics") or [])
+            right_relics = await self._names(
+                "relic", right.get("starting_relics") or []
+            )
+            rows = (
+                ("初始生命", left.get("starting_hp"), right.get("starting_hp")),
+                ("初始金币", left.get("starting_gold"), right.get("starting_gold")),
+                ("每回合能量", left.get("max_energy"), right.get("max_energy")),
+                ("充能球槽", left.get("orb_slots"), right.get("orb_slots")),
+                ("初始遗物", left_relics, right_relics),
+                ("解锁条件", left.get("unlocks_after"), right.get("unlocks_after")),
+            )
+        dimensions = []
+        for label, left_value, right_value in rows:
+            left_text = self._compare_text(left_value)
+            right_text = self._compare_text(right_value)
+            if left_text == right_text == "—":
+                continue
+            dimensions.append({"label": label, "left": left_text, "right": right_text})
+        return dimensions
+
+    async def _compare_metrics(self, kind, left, right):
+        metrics = {"left": {}, "right": {}}
+        try:
+            if kind in {"card", "relic"}:
+                plural = "cards" if kind == "card" else "relics"
+                scores = await self.client.get(
+                    f"/api/runs/scores/{plural}", {"lang": "zhs"}, self.page_ttl
+                )
+                if isinstance(scores, dict):
+                    for side, entity in (("left", left), ("right", right)):
+                        item = scores.get(str(entity.get("id", "")).upper())
+                        if isinstance(item, dict):
+                            metrics[side] = {
+                                key: item.get(key)
+                                for key in ("win_rate", "picks", "score")
+                                if item.get(key) is not None
+                            }
+            elif kind == "character":
+                stats = await self.client.get(
+                    "/api/runs/community-stats", {}, self.page_ttl
+                )
+                rows = stats.get("by_character") if isinstance(stats, dict) else []
+                for side, entity in (("left", left), ("right", right)):
+                    wanted = str(entity.get("id", "")).casefold()
+                    item = next(
+                        (
+                            row
+                            for row in rows or []
+                            if str(row.get("id", "")).casefold() == wanted
+                        ),
+                        None,
+                    )
+                    if isinstance(item, dict):
+                        metrics[side] = {
+                            key: item.get(key)
+                            for key in ("win_rate", "share", "runs")
+                            if item.get(key) is not None
+                        }
+        except (WikiError, TypeError, AttributeError):
+            pass
+        return metrics
+
     async def _search(self, query, question):
         version = await self._version()
         original = query

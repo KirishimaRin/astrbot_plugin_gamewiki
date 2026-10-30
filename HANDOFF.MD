@@ -145,7 +145,7 @@
 - 搜索会命中描述且同名实体多：`search` 必须精确名称优先；同名候选带角色/类型标签，并设置 `choice_intro`，不能沿用“没有同名条目”的默认文案。
 - BBCode：`clean()` 把 `[energy:N]` 转 `N费`、空强调对 `[blue][/blue]` 转 `X`；能力 `description` 可能丢数值，`effect_text` 先 `description` 后 `description_raw`。不要把 `[gold]` 等标签原样送进卡片或模型。
 - `_tool_read` 对 sts2 单独处理：source 留空或 `spirecodex`；不要走 `read_from_source`（它只认 bwiki 且会拒绝其他游戏）。
-- 验证：`pytest -q` 382 passed；Ruff 通过；framework 4.5.7/4.29.3 通过；package 35 files/11,117,165 bytes；真实 API 冒烟覆盖遗物、同名卡、怪物、事件分支、角色初始卡组、出招顺序、能力、术语、充能球、搭配、胜率、攻略、机制与中文攻击/伤害/进阶查询。
+- 验证：`pytest -q` 391 passed；Ruff 通过；framework 4.5.7/4.29.3 通过；package 35 files/11,121,539 bytes；真实 API 冒烟覆盖遗物、同名卡、怪物、事件分支、角色初始卡组、出招顺序、能力、术语、充能球、搭配、胜率、攻略、机制、中文伤害/进阶查询与同类型对比。
 - 尚无备用源；Spire Codex 故障时只能明确报错。未改版本号。
 
 ## 杀戮尖塔2 计划内增强（2026-10-30）
@@ -173,3 +173,12 @@
 - 概念路由：`伤害/易伤/格挡/商店/金币/稀有度/地图/精英/补丁/更新/胜率/排行/进阶/章节/解锁` 等出现在 **query** 时才覆盖模糊实体候选；实体名后面的方面词（“史莱姆 伤害”）仍走实体候选，避免把怪物问题路由到机制页。
 - `GUIDE_TERMS` 同时作为中文→英文兜底映射：伤害→combat、稀有度→rarity、商店→shop、金币→gold、地图→map、精英→elites、补丁/更新→patch、胜率/排行/Tier→tier、解锁→unlock、升级→upgrade。
 - `sts2_chinese_sources` 默认开启；`sts2_chinese_timeout_seconds` 默认 20 秒。关闭后只使用 Spire Codex 英文攻略/机制。
+
+## 杀戮尖塔2 对比方案 D（2026-10-30）
+
+- B 层默认不调用模型：`SpireCodexService.compare()` 先分别精确搜索两个条目，类型不同返回 `compare_unsupported`，任一边歧义/未命中返回 `compare_unavailable`，都交给 `format_compare()` 给出分开查询提示。
+- 只比较 card/card、relic/relic、character/character；卡牌维度是类型/稀有度/费用/目标/角色/关键词/伤害/格挡/效果/升级后，遗物是稀有度/池/价格/效果/风味，角色是初始生命/金币/能量/球槽/初始遗物/解锁。
+- 社区数据：卡牌/遗物读 `/api/runs/scores/{cards|relics}`，角色读 `/api/runs/community-stats` 的 `by_character`；读取失败只省略社区行，不影响字段对比。
+- C 层只在问题含“为什么/怎么选/适合/值得/推荐/理由”时调用模型，prompt 要求只使用给出的字段和效果、不编造联动/数值、最多 200 字；模型失败保留 B 层结果并记 fallback。
+- `A10和N10` 归一后相同，助手直接回答“同一条目/等级”，不调用 compare；STS2 的“有什么区别”走对比，其他游戏仍保留原分开查询提示。
+- `wiki_compare` 工具目前只支持 `game=sts2`，参数 `query_a/query_b/question/game`；框架契约检查已通过 4.5.7 与 4.29.3。

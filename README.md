@@ -53,7 +53,7 @@
 | `zzz` | 绝区零 | `/zzz` | [绝区零 BWIKI](https://wiki.biligame.com/zzz/) | — | 代理人、音擎、驱动盘、影画、调频聚合页 |
 | `arknights` | 明日方舟 | `/ark` | [PRTS.Wiki](https://prts.wiki/) | [方舟 BWIKI](https://wiki.biligame.com/arknights/) | 优先 PRTS（卡池一览与寻访规则），超时回退 |
 | `zmd` | 明日方舟：终末地 | `/zmd` | [AKEData](https://www.akedata.wiki/) | [终末地 BWIKI](https://wiki.biligame.com/zmd/) | 优先 AKEData 结构化数据，未收录内容回退 |
-| `sts2` | 杀戮尖塔2 | `/sts2` | [Spire Codex](https://spire-codex.com/) | — | 卡牌、遗物、药水、怪物、事件、角色、术语/充能球/苦痛/关键词/附魔；卡牌与遗物搭配、推荐、社区胜率；攻略与机制 |
+| `sts2` | 杀戮尖塔2 | `/sts2` | [Spire Codex](https://spire-codex.com/) | — | 卡牌、遗物、药水、怪物、事件、角色、术语/充能球/苦痛/关键词/附魔；卡牌与遗物搭配、推荐、社区胜率；同类型条目对比；攻略与机制 |
 
 > 杀戮尖塔2 数据来自社区反编译项目 [Spire Codex](https://spire-codex.com/)，非 Mega Crit 官方服务，无可用性 SLA；游戏数据版权归 Mega Crit。可通过 `spire_codex_base` 指向自建实例。该游戏目前没有可服务端访问的备用源，上游故障时会明确报错而不是静默回退。中文攻略/机制优先读取 [STS2.INFO](https://sts2.info/zh/mechanics) 与 [STS2FRONT](https://sts2front.com/zh-cn/tips/)，不可用时回退 Spire Codex 英文内容。
 
@@ -125,6 +125,7 @@ https://github.com/KirishimaRin/astrbot_plugin_gamewiki
 |---|---|---|
 | `wiki_search` | `query`、`question`、`game` | 搜索指定游戏的百科条目，自动提取最匹配分节并返回候选列表 |
 | `wiki_read` | `page_id`、`section`、`question`、`game`、`source` | 按搜索结果补充读取详细分节（双数据源游戏须填写 source） |
+| `wiki_compare` | `query_a`、`query_b`、`question`、`game` | 对比两个同类型条目，返回字段差异与社区数据（目前仅 `sts2`） |
 | `genshin_wiki_search` | `query`、`question` | （兼容旧版）原神专属搜索，等价于 `game=ys` |
 | `genshin_wiki_read` | `page_id`、`section`、`question` | （兼容旧版）原神专属补读 |
 

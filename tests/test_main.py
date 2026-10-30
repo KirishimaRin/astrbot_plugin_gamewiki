@@ -1155,3 +1155,19 @@ def test_query_notice_is_skipped_for_help(plugin):
         assert len(event.sent) == 1 and "用法：" in event.sent[0]
     finally:
         asyncio.run(configured.terminate())
+
+
+def test_wiki_compare_tool_only_supports_sts2(plugin):
+    instance, Event, module = plugin
+    instance.services["sts2"] = SimpleNamespace(
+        profile=module.PROFILES["sts2"],
+        compare=AsyncMock(return_value={"status": "compare", "game": "sts2"}),
+    )
+    ok = json.loads(
+        asyncio.run(instance.wiki_compare(Event(), "燃烧之血", "红头骨", "", "sts2"))
+    )
+    assert ok["status"] == "compare"
+    unsupported = json.loads(
+        asyncio.run(instance.wiki_compare(Event(), "草神", "钟离", "", "ys"))
+    )
+    assert unsupported["code"] == "unsupported"
