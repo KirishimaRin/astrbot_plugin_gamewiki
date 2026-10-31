@@ -708,3 +708,145 @@ def test_activity_item_questions_do_not_hit_the_activity_list(tmp_path):
     assert _activity_question("现在有什么活动")
     assert not _activity_question("活动道具有哪些")
     assert not _activity_question("朝月赠礼活动说明")
+
+
+def test_prefixed_candidates_pick_the_richest_entry(tmp_path):
+    """两三条前缀候选时探测详情，自动读内容最丰富的；空壳词条仍回候选。"""
+    search_payloads = {
+        "声骸系统": {
+            "code": 200,
+            "data": {
+                "results": {
+                    "records": [
+                        {
+                            "id": 1,
+                            "name": "声骸系统详解",
+                            "content": {
+                                "type": "horizontal-figure",
+                                "title": "声骸系统详解",
+                                "linkId": "301",
+                            },
+                        },
+                        {
+                            "id": 2,
+                            "name": "声骸系统入门",
+                            "content": {
+                                "type": "horizontal-figure",
+                                "title": "声骸系统入门",
+                                "linkId": "302",
+                            },
+                        },
+                    ]
+                }
+            },
+        },
+        "索拉等级": {
+            "code": 200,
+            "data": {
+                "results": {
+                    "records": [
+                        {
+                            "id": 1,
+                            "name": "索拉等级提升・一",
+                            "content": {
+                                "type": "text-list-small",
+                                "title": "索拉等级提升・一",
+                                "linkId": "401",
+                            },
+                        },
+                        {
+                            "id": 2,
+                            "name": "索拉等级提升・二",
+                            "content": {
+                                "type": "text-list-small",
+                                "title": "索拉等级提升・二",
+                                "linkId": "402",
+                            },
+                        },
+                    ]
+                }
+            },
+        },
+    }
+    details = {
+        301: {
+            "code": 200,
+            "data": {
+                "content": {
+                    "title": "声骸系统详解",
+                    "modules": [
+                        {
+                            "title": "概览",
+                            "components": [{"content": "<p>详解正文</p>"}],
+                        }
+                    ],
+                }
+            },
+        },
+        302: {
+            "code": 200,
+            "data": {
+                "content": {
+                    "title": "声骸系统入门",
+                    "modules": [
+                        {
+                            "title": "概览",
+                            "components": [{"content": "<p>入门正文更丰富</p>"}],
+                        },
+                        {
+                            "title": "进阶",
+                            "components": [{"content": "<p>进阶说明</p>"}],
+                        },
+                    ],
+                }
+            },
+        },
+        # 401/402 有意缺席：详情 404 走 WikiError → 视为空壳。
+    }
+
+    def handler(request):
+        path = request.url.path
+        if path == "/wiki/core/catalogue/item/search":
+            form = parse_qs(request.content.decode("utf-8"))
+            keyword = form["keyword"][0]
+            return httpx.Response(200, json=search_payloads[keyword])
+        if path == "/wiki/core/catalogue/item/getEntryDetail":
+            form = parse_qs(request.content.decode("utf-8"))
+            entry_id = int(form["id"][0])
+            payload = details.get(entry_id)
+            if payload is None:
+                return httpx.Response(
+                    200, json={"code": 2031, "msg": "当前词条不存在", "data": None}
+                )
+            return httpx.Response(200, json=payload)
+        return httpx.Response(404, json={})
+
+    async def run():
+        client = make_client(tmp_path, handler)
+        service = KuroBbsService(client)
+        try:
+            result = await service.search("声骸系统")
+            assert result["status"] == "ok"
+            # 两篇都有正文：取模块更多的「入门」。
+            assert result["title"] == "声骸系统入门"
+            # 空壳词条（详情不存在）不自动读，交回候选。
+            stub = await service.search("索拉等级")
+            assert stub["status"] == "needs_choice"
+            assert {c["title"] for c in stub["candidates"]} == {
+                "索拉等级提升・一",
+                "索拉等级提升・二",
+            }
+        finally:
+            await client.close()
+
+    asyncio.run(run())
+
+
+def test_system_concept_aliases_resolve_on_the_primary(tmp_path):
+    client = make_client(tmp_path, kuro_handler(SEARCH_RECORDS))
+    service = KuroBbsService(client)
+    assert service.aliases["深渊"] == "逆境深塔"
+    assert service.aliases["每日任务"] == "活跃度"
+    assert service.aliases["体力"] == "结晶溶剂"
+    assert service.aliases["数据坞"] == "数据坞等级"
+    asyncio.run(client.close())

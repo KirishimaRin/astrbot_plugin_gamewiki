@@ -108,7 +108,13 @@ class WuwaSources(SourceRouter):
         from .games import normalize_slang
 
         query = normalize_slang(query, self.profile)
+        raw_question = question
         question = normalize_slang(question, self.profile) if question else question
+        # 「毕业面板」的“毕业”被黑话删掉，等级线索在这里补回。
+        if any(word in raw_question for word in ("毕业", "满级")) and any(
+            word in raw_question for word in ("面板", "属性", "等级", "数值")
+        ):
+            question = f"{question} 90级"
         if not question:
             query, question = _split_aspect(query)
         return await super().search(query, question)

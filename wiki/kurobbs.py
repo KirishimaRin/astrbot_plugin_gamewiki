@@ -580,8 +580,6 @@ class KuroBbsService:
         query = _strip_question_suffix(self.aliases.get(query, query))
         query = normalize_slang(query, self.profile)
         question = normalize_slang(question, self.profile)
-        if not question:
-            query, question = _split_aspect(query)
         # 「毕业面板」的“毕业”被全局黑话删掉后失去等级线索，补回 90 级。
         if any(word in raw_question for word in ("毕业", "满级")) and any(
             word in raw_question for word in ("面板", "属性", "等级", "数值")
@@ -609,7 +607,7 @@ class KuroBbsService:
                 "invalid_response", "库街区数据结构发生变化，请稍后重试。"
             ) from None
 
-    async def _search(self, query, question):
+    async def _search(self, query, question, allow_split=True):
         text = f"{query}\n{question}"
         if _banner_question(text):
             return await self._banner_result(query, question)
@@ -646,20 +644,40 @@ class KuroBbsService:
             "question": question,
             "game": "ww",
         }
+        exact = [entry for entry in entries if _name_key(entry["name"]) == query]
+        prefixed = []
+        if not exact and len(query) >= 3:
+            # 查询词是标题前缀的候选：「声骸系统」→「声骸系统详解」。唯一
+            # 命中直接读；两三条时探测详情取内容最丰富的一篇（新手 → 新手
+            # 指南），空壳词条（索拉等级提升・一/・二 都没有正文）不自动读，
+            # 仍交回候选。
+            prefixed = [e for e in entries if _name_key(e["name"]).startswith(query)]
+            if len(prefixed) == 1:
+                exact = prefixed
+            elif 2 <= len(prefixed) <= 3:
+                probed = await self._probe_titles(prefixed, query)
+                rich = [e for e in probed if e.get("module_count", 0) > 0]
+                if rich:
+                    exact = rich
+        if not exact and allow_split and not question:
+            # 连写问法（「今汐满链效果」）先按全句搜，搜不出精确/前缀候选
+            # 再拆成实体+方面重试一次。不能先拆：「索拉等级」里的「等级」
+            # 是方面词，先拆会把实体拆没。
+            head, tail = _split_aspect(query)
+            if tail and head and head != query:
+                try:
+                    retry = await self._search(head, tail, allow_split=False)
+                except Exception:  # noqa: BLE001 - 拆分失败仍回退全句候选
+                    retry = None
+                if retry is not None and retry.get("status") == "ok":
+                    retry = {**retry, "query": query}
+                    return retry
         if not entries:
             return {
                 **base,
                 "status": "not_found",
                 "message": f"未找到相关{self.profile.name}词条。",
             }
-        exact = [entry for entry in entries if _name_key(entry["name"]) == query]
-        if not exact and len(query) >= 3:
-            # 唯一的“查询词是标题前缀”候选可直接读：「声骸系统」→「声骸系统
-            # 详解」、「索拉等级」→「索拉等级提升・一」。多条前缀候选仍让
-            # 用户选，避免把「新手」误配到某一篇攻略。
-            prefixed = [e for e in entries if _name_key(e["name"]).startswith(query)]
-            if len(prefixed) == 1:
-                exact = prefixed
         if not exact:
             return {
                 **base,
