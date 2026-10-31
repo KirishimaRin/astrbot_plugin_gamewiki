@@ -833,7 +833,7 @@ class GameWiki(Star):
             section(string): 分节名称，空字符串表示按问题自动筛选。
             question(string): 要解答的问题。
             game(string): 与搜索结果相同的游戏代码。
-            source(string): 明日方舟和终末地必须填写搜索返回的 source_key（prts、akedata 或 bwiki），其他游戏可留空。
+            source(string): 明日方舟、终末地和鸣潮必须填写搜索返回的 source_key（prts、akedata、kurobbs 或 bwiki），其他游戏可留空。
         """
         result = await self._tool_read(event, page_id, section, question, game, source)
         return json.dumps(result, ensure_ascii=False)

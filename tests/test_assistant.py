@@ -568,7 +568,7 @@ class TestUnknownTailRetry(unittest.IsolatedAsyncioTestCase):
 
         service = Service()
         service.search = search
-        generate = AsyncMock()
+        generate = AsyncMock(return_value="角色语音资料概览")
         reply, metrics = await CommandAssistant(generate).answer(
             "胡桃语音", PROFILES["ys"], service
         )

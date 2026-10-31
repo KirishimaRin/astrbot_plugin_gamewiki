@@ -436,7 +436,7 @@ async def main():
                     "llm_tool docstring Args format",
                     "real decorator schemas",
                     "real all-message decorator and event type filter",
-                    "five English-only commands and removed aliases",
+                    "seven English-only commands and removed aliases",
                     "multi-game commands and routing",
                     "multi-word command",
                     "formatted command sent once without result re-segmentation",
