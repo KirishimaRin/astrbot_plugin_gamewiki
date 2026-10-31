@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/KirishimaRin/astrbot_plugin_gamewiki/actions/workflows/ci.yml/badge.svg)](https://github.com/KirishimaRin/astrbot_plugin_gamewiki/actions/workflows/ci.yml)
 
-查询原神、崩坏：星穹铁道、绝区零、明日方舟、明日方舟：终末地与杀戮尖塔2的角色、卡牌、遗物、技能、材料、配装、卡池和任务资料。支持命令查询与大模型工具调用，向用户返回中文概览、证据卡片与来源链接。明日方舟优先 PRTS，终末地优先 AKEData，杀戮尖塔2使用 Spire Codex，其余三款游戏使用 BWIKI。所有公开维基查询均直接调取公开接口，无需 API Key、UID 或游戏账号凭据。
+查询原神、崩坏：星穹铁道、绝区零、明日方舟、明日方舟：终末地、杀戮尖塔2与鸣潮的角色、卡牌、遗物、技能、材料、配装、卡池和任务资料。支持命令查询与大模型工具调用，向用户返回中文概览、证据卡片与来源链接。明日方舟优先 PRTS，终末地优先 AKEData，杀戮尖塔2使用 Spire Codex，鸣潮优先库街区官方攻略库，其余三款游戏使用 BWIKI。所有公开维基查询均直接调取公开接口，无需 API Key、UID 或游戏账号凭据。
 
 当前版本：**v0.4.0**；作者：**KirishimaRin**；插件标识：`astrbot_plugin_gamewiki`。持续改进计划见 [ROADMAP](docs/ROADMAP.md)。
 
@@ -56,7 +56,7 @@
 
 ## 支持游戏与数据源
 
-六款游戏共用一套查询管线，各站点数据源按稳定性与完整度分级：
+七款游戏共用一套查询管线，各站点数据源按稳定性与完整度分级：
 
 | 游戏代号 | 游戏名称 | 快捷命令 | 优先主数据源 | 备用数据源 | 说明 |
 |---|---|---|---|---|---|
@@ -65,6 +65,7 @@
 | `zzz` | 绝区零 | `/zzz` | [绝区零 BWIKI](https://wiki.biligame.com/zzz/) | — | 代理人、音擎、驱动盘、影画、调频聚合页 |
 | `arknights` | 明日方舟 | `/ark` | [PRTS.Wiki](https://prts.wiki/) | [方舟 BWIKI](https://wiki.biligame.com/arknights/) | 优先 PRTS（卡池一览与寻访规则），超时回退 |
 | `zmd` | 明日方舟：终末地 | `/zmd` | [AKEData](https://www.akedata.wiki/) | [终末地 BWIKI](https://wiki.biligame.com/zmd/) | 优先 AKEData 结构化数据，未收录内容回退 |
+| `ww` | 鸣潮 | `/ww` | [库街区官方攻略库](https://wiki.kurobbs.com/mc/home) | [鸣潮 BWIKI](https://wiki.biligame.com/wutheringwaves/) | 共鸣者、武器、声骸与声骸合鸣、敌人、道具；官方养成推荐（武器/声骸/配队/技能加点）；当期唤取与版本活动（官方首页/活动合集）；等级属性表与突破材料；语音、档案、共鸣链两源互补 |
 | `sts2` | 杀戮尖塔2 | `/sts2` | [Spire Codex](https://spire-codex.com/) | — | 卡牌、遗物、药水、怪物、事件、角色、术语/充能球/苦痛/关键词/附魔；角色遗物池/卡牌筛选与社区胜率排行；Boss 打法要点；卡牌/遗物/药水获取与进阶解锁规则；同类型条目对比；进阶、章节 BOSS/精英、成就、解锁、剧情/纪元、商店规则；事件社区选择；攻略与机制 |
 
 > 杀戮尖塔2 数据来自社区反编译项目 [Spire Codex](https://spire-codex.com/)，非 Mega Crit 官方服务，无可用性 SLA；游戏数据版权归 Mega Crit。可通过 `spire_codex_base` 指向自建实例。该游戏目前没有可服务端访问的备用源，上游故障时会明确报错而不是静默回退。中文攻略/机制优先读取 [STS2.INFO](https://sts2.info/zh/mechanics) 与 [STS2FRONT](https://sts2front.com/zh-cn/tips/)，不可用时回退 Spire Codex 英文内容；中文正文版权归原站，插件只展示检索所需节选并链接原文，商用分发前请先确认站点授权。
@@ -105,6 +106,7 @@ https://github.com/KirishimaRin/astrbot_plugin_gamewiki
 | `/ark` | 明日方舟 | `/ark 能天使专三材料`<br>`/ark 银灰精英化`<br>`/ark 寻访保底是多少`<br>`/ark 寻访凭证怎么获得` |
 | `/zmd` | 终末地 | `/zmd 汤汤技能`<br>`/zmd 武器图鉴`<br>`/zmd 干员基础属性` |
 | `/sts2` | 杀戮尖塔2 | `/sts2 燃烧之血`<br>`/sts2 铁甲战士遗物池`<br>`/sts2 静默猎手卡牌排行`<br>`/sts2 知识恶魔怎么打` |
+| `/ww` | 鸣潮 | `/ww 今汐`<br>`/ww 今汐声骸搭配`<br>`/ww 卡卡罗大招倍率`<br>`/ww 彻空冥雷2件套效果` |
 
 ### 常见查询模式
 - **条目基础介绍**：`/ys 钟离` ➡️ 返回角色定位、神之眼、基础简介与立绘。
@@ -141,11 +143,12 @@ https://github.com/KirishimaRin/astrbot_plugin_gamewiki
 | `genshin_wiki_search` | `query`、`question` | （兼容旧版）原神专属搜索，等价于 `game=ys` |
 | `genshin_wiki_read` | `page_id`、`section`、`question` | （兼容旧版）原神专属补读 |
 
-`query` 填写条目名称或简短关键词，`question` 填写完整问题，`game` 填写游戏代码（`ys` / `sr` / `zzz` / `arknights` / `zmd` / `sts2`）。
+`query` 填写条目名称或简短关键词，`question` 填写完整问题，`game` 填写游戏代码（`ys` / `sr` / `zzz` / `arknights` / `zmd` / `sts2` / `ww`）。
 
 **数据源选择（source 参数）**：
 - 明日方舟：填写 `prts`（优先）或 `bwiki`；
 - 终末地：填写 `akedata`（优先）或 `bwiki`；
+- 鸣潮：填写 `kurobbs`（优先）或 `bwiki`；
 - 杀戮尖塔2：可留空或填写 `spirecodex`；
 - 原神、星铁、绝区零：留空即可。
 
@@ -172,7 +175,8 @@ AI 工具路径全面接入黑话归一化逻辑，大模型对话中调用工�
 
 | 配置项 | 默认值 | 说明 |
 |---|:---:|---|
-| `games` | `["ys", "sr", "zzz", "arknights", "zmd", "sts2"]` | 启用的游戏列表。可按需删减，空列表自动回退为全部启用 |
+| `games` | `["ys", "sr", "zzz", "arknights", "zmd", "sts2", "ww"]` | 启用的游戏列表。可按需删减，空列表自动回退为全部启用 |
+| `kuro_bbs_base` | `https://api.kurobbs.com` | 鸣潮主数据源（库街区官方 wiki）接口根地址；留空使用官方地址，搜索异常时自动回退 BWIKI |
 | `spire_codex_base` | `https://spire-codex.com` | 杀戮尖塔2 接口根地址（插件追加 `/api`）；可改为自建实例，留空使用官方地址 |
 | `spire_codex_cdn` | `https://cdn.spire-codex.com` | 杀戮尖塔2 图片 CDN；自建实例未托管图片时可替换 |
 | `sts2_chinese_sources` | `true` | 使用 STS2.INFO / STS2FRONT 中文攻略与机制；关闭后只用 Spire Codex |

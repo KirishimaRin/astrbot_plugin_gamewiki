@@ -49,9 +49,10 @@
       "zzz",
       "arknights",
       "zmd",
-      "sts2"
+      "sts2",
+      "ww"
     ],
-    "hint": "默认启用全部六款游戏。可用值：ys(原神)、sr(星穹铁道)、zzz(绝区零)、arknights(明日方舟)、zmd(终末地)、sts2(杀戮尖塔2)；已有配置保留，可按需删减。空列表或无有效游戏时回退为全部启用"
+    "hint": "默认启用全部七款游戏。可用值：ys(原神)、sr(星穹铁道)、zzz(绝区零)、arknights(明日方舟)、zmd(终末地)、sts2(杀戮尖塔2)、ww(鸣潮)；已有配置保留，可按需删减。空列表或无有效游戏时回退为全部启用"
   },
   "spire_codex_base": {
     "description": "Spire Codex 接口地址",
@@ -64,6 +65,12 @@
     "type": "string",
     "default": "https://cdn.spire-codex.com",
     "hint": "角色立绘等图片地址；自建实例未托管图片时可改为自有 CDN。留空使用官方 CDN"
+  },
+  "kuro_bbs_base": {
+    "description": "库街区接口地址",
+    "type": "string",
+    "default": "https://api.kurobbs.com",
+    "hint": "鸣潮主数据源（库街区官方 wiki）的 API 根地址；留空使用官方地址。搜索异常时自动回退 BWIKI"
   },
   "sts2_chinese_sources": {
     "description": "杀戮尖塔2 中文攻略/机制源",

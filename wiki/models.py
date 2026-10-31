@@ -33,6 +33,9 @@ def page_url(title: str, anchor: str = "", code: str = "ys", source: str = "") -
     base = (
         "https://prts.wiki/w/"
         if source == "prts"
+        # 鸣潮 BWIKI 站前缀与游戏代码不同。
+        else "https://wiki.biligame.com/wutheringwaves/"
+        if code == "ww"
         else f"https://wiki.biligame.com/{code}/"
     )
     url = base + quote(title, safe="/")

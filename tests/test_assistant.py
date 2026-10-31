@@ -546,15 +546,35 @@ class TestUnknownTailRetry(unittest.IsolatedAsyncioTestCase):
         service.search = search
         generate = AsyncMock(
             side_effect=[
-                json.dumps({"query": "胡桃", "question": "胡桃语音"}),
-                "语音台词收录在角色页。",
+                json.dumps({"query": "胡桃", "question": "胡桃好感"}),
+                "好感度台词收录在角色页。",
             ]
         )
         reply, metrics = await CommandAssistant(generate).answer(
+            "胡桃好感", PROFILES["ys"], service
+        )
+        assert calls == ["胡桃好感", "胡桃"]
+        assert metrics["model_calls"] == 2
+        assert reply
+
+    async def test_voice_tail_splits_instead_of_retrying_the_model(self):
+        # 「语音」现在是方面词：实体+语音高置信拆分，直接读角色页并
+        # 命中语音子页机制，不再消耗模型调用。
+        calls = []
+
+        async def search(query, question=""):
+            calls.append((query, question))
+            return page()
+
+        service = Service()
+        service.search = search
+        generate = AsyncMock()
+        reply, metrics = await CommandAssistant(generate).answer(
             "胡桃语音", PROFILES["ys"], service
         )
-        assert calls == ["胡桃语音", "胡桃"]
-        assert metrics["model_calls"] == 2
+        assert calls and calls[0][0] == "胡桃"
+        # 仅剩概览生成一次调用：不再走“未命中→重抽实体”的重试链。
+        assert metrics["model_calls"] == 1
         assert reply
 
     async def test_short_bare_names_do_not_spend_a_model_call(self):
