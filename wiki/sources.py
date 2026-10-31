@@ -26,19 +26,29 @@ class SourceRouter:
         return result
 
     async def _search(self, query, question):
+        primary_result = None
         try:
-            result = await asyncio.wait_for(
+            primary_result = await asyncio.wait_for(
                 self.primary.search(query, question), min(8, self.timeout * 0.6)
             )
-            if result.get("status") not in {"not_found", "section_not_found"}:
-                return self._annotate(result, self.primary_source)
+            if primary_result.get("status") not in {"not_found", "section_not_found"}:
+                return self._annotate(primary_result, self.primary_source)
         except WikiError as exc:
             if exc.code == "bad_input":
                 raise
         except asyncio.TimeoutError:
             pass
         self.fallbacks += 1
-        result = self._annotate(await self.fallback.search(query, question), "bwiki")
+        try:
+            result = await self.fallback.search(query, question)
+        except WikiError:
+            # 主源已经明确“没有这个词条/分节”时，兜底源故障不改变这个
+            # 结论：返回主源的 not_found 比抛上游错误更准确（BWIKI 的 WAF
+            # 是间歇性的，用户不该因此看到“服务异常”）。
+            if primary_result is not None:
+                return self._annotate(primary_result, self.primary_source)
+            raise
+        result = self._annotate(result, "bwiki")
         result["fallback_from"] = self.primary_source
         return result
 

@@ -58,6 +58,27 @@ CATALOGUES = {
 }
 LIST_WORDS = ("有哪些", "图鉴", "列表", "一览", "全部", "所有")
 
+# 当期唤取：库街区 wiki 首页的「角色活动唤取 / 武器活动唤取」模块带
+# 卡池名、起止时间与 UP 词条 ID，是官方且随版本更新的结构化数据。
+BANNER_PAGE_ID = 900001
+ACTIVITY_PAGE_ID = 900002
+ACTIVITY_WORDS = ("有哪些", "有什么", "列表", "一览", "现在", "当前", "本期", "这期")
+BANNER_MODULES = ("角色活动唤取", "武器活动唤取")
+# 不放「当前」：它会命中「当前版本」这类非卡池问题。
+BANNER_WORDS = (
+    "UP",
+    "up",
+    "当期",
+    "复刻",
+    "卡池",
+    "唤取",
+    "池子",
+    "武器池",
+    "角色池",
+    "抽卡",
+    "限定",
+)
+
 # 库街区标题用「玉冥蛇（声骸）」「头像『今汐』」类后缀标注条目种类；
 # 精确名比较剥掉末尾括注，展示仍用完整标题。
 _SUFFIX = re.compile(r"（[^（）]*）$")
@@ -149,6 +170,17 @@ def _split_aspect(query):
         if index >= 2:
             return query[:index], query[index:]
     return query, ""
+
+
+def _banner_question(text):
+    return any(word in text for word in BANNER_WORDS)
+
+
+def _activity_question(text):
+    # 「活动道具有哪些」问的是道具分类，不是活动列表。
+    if "道具" in text:
+        return False
+    return "活动" in text and any(word in text for word in ACTIVITY_WORDS)
 
 
 def _list_catalogue(text):
@@ -578,7 +610,12 @@ class KuroBbsService:
             ) from None
 
     async def _search(self, query, question):
-        catalogue = _list_catalogue(f"{query}\n{question}")
+        text = f"{query}\n{question}"
+        if _banner_question(text):
+            return await self._banner_result(query, question)
+        if _activity_question(text):
+            return await self._activity_result(query, question)
+        catalogue = _list_catalogue(text)
         if catalogue:
             return await self._catalogue_list(catalogue, query, question)
         data = await self.client.get(
@@ -646,6 +683,231 @@ class KuroBbsService:
         result.update(await self._read(chosen["id"], focus, ""))
         result["source_urls"] = [result["url"]]
         return result
+
+    async def _current_activity_catalogue(self):
+        """目录树里「活动合集」下 id 最大的版本节点即当前版本活动。"""
+        try:
+            data = await self.client.get(
+                "/wiki/core/catalogue/config/getTree", {}, self.page_ttl
+            )
+        except WikiError:
+            return 0, ""
+        stack = [data] if isinstance(data, dict) else []
+        while stack:
+            node = stack.pop()
+            if not isinstance(node, dict):
+                continue
+            if "活动合集" in str(node.get("name") or ""):
+                children = [c for c in node.get("children") or [] if c.get("id")]
+                if children:
+                    newest = max(children, key=lambda c: int(c.get("id") or 0))
+                    return int(newest["id"]), str(newest.get("name") or "").strip()
+            stack.extend(node.get("children") or [])
+        return 0, ""
+
+    async def _activity_result(self, query, question):
+        """当前版本活动清单（库街区「活动合集」按版本维护）。"""
+        catalogue_id, version_name = await self._current_activity_catalogue()
+        if not catalogue_id:
+            return {
+                "status": "not_found",
+                "query": query,
+                "question": question,
+                "game": "ww",
+                "message": "暂未获取到当前版本活动清单。",
+            }
+        data = await self.client.get(
+            "/wiki/core/catalogue/item/getPage",
+            {"data": {"catalogueId": catalogue_id, "page": 1, "limit": 100}},
+            self.search_ttl,
+        )
+        names = []
+        for record in (data.get("results") or {}).get("records") or []:
+            name = str(record.get("name") or "").strip()
+            if name and name not in names:
+                names.append(name)
+        if not names:
+            return {
+                "status": "not_found",
+                "query": query,
+                "question": question,
+                "game": "ww",
+                "message": f"{version_name or '当前版本'}暂无活动条目。",
+            }
+        if not version_name:
+            title = "当前版本活动"
+        elif version_name.endswith("活动"):
+            title = version_name
+        else:
+            title = f"{version_name}活动"
+        sections = [Section(title, "", [f"共 {len(names)} 项\n" + "\n".join(names)])]
+        url = f"https://wiki.kurobbs.com/mc/catalogue/list?catalogueId={catalogue_id}"
+        snippets, truncated, selection = evidence(
+            sections,
+            "",
+            self.max_chars,
+            "",
+            title,
+            self.profile.intents,
+            self.profile.specifics,
+        )
+        for snippet in snippets:
+            snippet.pop("anchor", None)
+            snippet["url"] = url
+        return {
+            "status": "ok" if snippets else "section_not_found",
+            "game": "ww",
+            "source": f"{self.profile.name} 库街区",
+            "source_key": "kurobbs",
+            "query": query,
+            "question": question,
+            "title": title,
+            "page_id": ACTIVITY_PAGE_ID,
+            "url": url,
+            "source_urls": [url],
+            "image_url": "",
+            "revision_id": 0,
+            "data_version": "",
+            "published_at": "",
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "available_sections": [title],
+            "related_pages": [],
+            "evidence": snippets,
+            "truncated": truncated,
+            "selection": selection,
+            "instructions": (
+                "这是当前版本的活动清单，按清单回答名称与数量；"
+                "活动具体玩法可继续查对应「活动说明」条目。末尾附 source_urls。"
+            ),
+        }
+
+    async def _catalogue_names(self, catalogue_id):
+        """linkId -> (名称, 星级) for one 图鉴 category (cached by client)."""
+        data = await self.client.get(
+            "/wiki/core/catalogue/item/getPage",
+            {"data": {"catalogueId": catalogue_id, "page": 1, "limit": 300}},
+            self.page_ttl,
+        )
+        names = {}
+        for record in (data.get("results") or {}).get("records") or []:
+            content = record.get("content") or {}
+            try:
+                link_id = int(content.get("linkId"))
+            except (TypeError, ValueError):
+                continue
+            name = str(content.get("title") or record.get("name") or "").strip()
+            if name:
+                names[link_id] = (name, str(content.get("star") or "").strip())
+        return names
+
+    async def _banner_result(self, query, question):
+        """Current 角色/武器活动唤取 from the official wiki homepage.
+
+        Each module tab carries the banner name, a countdown date range and
+        the UP entry ids; names resolve through the 共鸣者/武器 图鉴 lists so
+        no per-entry detail request is needed.
+        """
+        data = await self.client.get(
+            "/wiki/core/homepage/getPage",
+            {"data": {"page": 1, "limit": 10}},
+            self.search_ttl,
+        )
+        content = data.get("contentJson") or {}
+        modules = {
+            module.get("title"): module
+            for module in content.get("sideModules") or []
+            if module.get("title") in BANNER_MODULES
+        }
+        if not modules:
+            return {
+                "status": "not_found",
+                "query": query,
+                "question": question,
+                "game": "ww",
+                "message": "库街区首页暂未提供当期唤取信息。",
+            }
+        names = {}
+        for catalogue_id in (1105, 1106):
+            names.update(await self._catalogue_names(catalogue_id))
+        sections = []
+        for title in BANNER_MODULES:
+            module = modules.get(title)
+            if not module:
+                continue
+            blocks = []
+            for tab in (module.get("content") or {}).get("tabs") or []:
+                banner = str(tab.get("name") or "").strip() or "未命名唤取"
+                countdown = tab.get("countDown") or {}
+                dates = countdown.get("dateRange") or ["", ""]
+                up = []
+                for img in tab.get("imgs") or []:
+                    link = (img.get("linkConfig") or {}).get("entryId")
+                    try:
+                        entry_id = int(link)
+                    except (TypeError, ValueError):
+                        continue
+                    name, star = names.get(entry_id, ("", ""))
+                    if name:
+                        up.append(f"{name}（{star}★）" if star else name)
+                lines = [f"「{banner}」"]
+                if dates[0] and dates[1]:
+                    lines.append(f"时间：{dates[0]} ~ {dates[1]}")
+                if up:
+                    lines.append("UP：" + "、".join(dict.fromkeys(up)))
+                blocks.append("\n".join(lines))
+            if blocks:
+                sections.append(Section(title, "", blocks))
+        if not sections:
+            return {
+                "status": "not_found",
+                "query": query,
+                "question": question,
+                "game": "ww",
+                "message": "库街区首页暂未提供当期唤取信息。",
+            }
+        url = "https://wiki.kurobbs.com/mc/home"
+        # 命令路径常把「武器池」整句放在 query 里、question 为空；用两者
+        # 合起来判断要角色池还是武器池。
+        focus = question or query
+        snippets, truncated, selection = evidence(
+            sections,
+            focus,
+            self.max_chars,
+            "",
+            "当期唤取",
+            self.profile.intents,
+            self.profile.specifics,
+        )
+        for snippet in snippets:
+            snippet.pop("anchor", None)
+            snippet["url"] = url
+        return {
+            "status": "ok" if snippets else "section_not_found",
+            "game": "ww",
+            "source": f"{self.profile.name} 库街区",
+            "source_key": "kurobbs",
+            "query": query,
+            "question": question,
+            "title": "当期唤取",
+            "page_id": BANNER_PAGE_ID,
+            "url": url,
+            "source_urls": [url],
+            "image_url": "",
+            "revision_id": 0,
+            "data_version": "",
+            "published_at": "",
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "available_sections": [s.title for s in sections],
+            "related_pages": [],
+            "evidence": snippets,
+            "truncated": truncated,
+            "selection": selection,
+            "instructions": (
+                "这是库街区官方 wiki 首页的当期唤取模块，只含正在展示的卡池与时间；"
+                "问复刻时只能给当前在售卡池，历史复刻记录站点未维护，不要编造；"
+                "末尾附 source_urls。"
+            ),
+        }
 
     async def _catalogue_list(self, catalogue_id, query, question):
         """List every entry in one 图鉴 category (声骸/武器/共鸣者/…).
@@ -770,6 +1032,10 @@ class KuroBbsService:
         }
 
     async def _read(self, entry_id, question, section):
+        if entry_id == BANNER_PAGE_ID:
+            return await self._banner_result("", question)
+        if entry_id == ACTIVITY_PAGE_ID:
+            return await self._activity_result("", question)
         if entry_id in CATALOGUES:
             return await self._catalogue_list(entry_id, "", question)
         data = await self.client.get(

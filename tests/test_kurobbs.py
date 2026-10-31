@@ -14,6 +14,7 @@ from wiki.kurobbs import (
     modules_to_sections,
 )
 from wiki.models import WikiError
+from wiki.games import PROFILES
 from wiki.sources import WuwaSources
 
 # 精简自 2026-10-30 真实响应的合成 fixture：结构一致、数值缩短。
@@ -506,3 +507,204 @@ def test_profile_aliases_apply_to_the_kurobbs_service(tmp_path):
     assert service.aliases["汐汐"] == "今汐"
     assert service.aliases["深塔"] == "逆境深塔"
     asyncio.run(client.close())
+
+
+HOMEPAGE = {
+    "code": 200,
+    "data": {
+        "contentJson": {
+            "sideModules": [
+                {
+                    "title": "角色活动唤取",
+                    "content": {
+                        "tabs": [
+                            {
+                                "name": "测试角色池",
+                                "countDown": {
+                                    "dateRange": [
+                                        "2026-10-22 10:00",
+                                        "2026-11-11 11:59",
+                                    ]
+                                },
+                                "imgs": [
+                                    {"linkConfig": {"entryId": "1001"}},
+                                    {"linkConfig": {"entryId": "1002"}},
+                                ],
+                            }
+                        ]
+                    },
+                },
+                {
+                    "title": "武器活动唤取",
+                    "content": {
+                        "tabs": [
+                            {
+                                "name": "测试武器池",
+                                "countDown": {
+                                    "dateRange": [
+                                        "2026-10-22 10:00",
+                                        "2026-11-11 11:59",
+                                    ]
+                                },
+                                "imgs": [{"linkConfig": {"entryId": "2001"}}],
+                            }
+                        ]
+                    },
+                },
+            ]
+        }
+    },
+}
+CATALOGUE_RECORDS = {
+    1105: [
+        {"name": "甲", "content": {"linkId": "1001", "star": "5"}},
+        {"name": "乙", "content": {"linkId": "1002", "star": "4"}},
+    ],
+    1106: [{"name": "乙武", "content": {"linkId": "2001", "star": "5"}}],
+}
+
+
+def banner_handler(request):
+    path = request.url.path
+    if path == "/wiki/core/homepage/getPage":
+        return httpx.Response(200, json=HOMEPAGE)
+    if path == "/wiki/core/catalogue/item/getPage":
+        form = parse_qs(request.content.decode("utf-8"))
+        cid = int(form["catalogueId"][0])
+        return httpx.Response(
+            200,
+            json={
+                "code": 200,
+                "data": {"results": {"records": CATALOGUE_RECORDS.get(cid, [])}},
+            },
+        )
+    return httpx.Response(404, json={})
+
+
+def test_current_banners_come_from_the_official_homepage(tmp_path):
+    async def run():
+        client = make_client(tmp_path, banner_handler)
+        service = KuroBbsService(client)
+        try:
+            result = await service.search("现在UP什么")
+            assert result["status"] == "ok"
+            assert result["page_id"] == 900001
+            assert result["available_sections"] == ["角色活动唤取", "武器活动唤取"]
+            text = "\n".join(item["text"] for item in result["evidence"])
+            assert "测试角色池" in text and "甲（5★）" in text
+            assert "2026-10-22 10:00 ~ 2026-11-11 11:59" in text
+            assert "测试武器池" in text and "乙武（5★）" in text
+            # 武器池只给武器唤取，角色池只给角色唤取。
+            weapon = await service.search("武器池")
+            assert [i["section"] for i in weapon["evidence"]] == ["武器活动唤取"]
+            character = await service.search("角色池")
+            assert [i["section"] for i in character["evidence"]] == ["角色活动唤取"]
+            # 补读同一个 page_id 可重建。
+            again = await service.read(900001)
+            assert again["status"] == "ok"
+            assert "测试角色池" in again["evidence"][0]["text"]
+        finally:
+            await client.close()
+
+    asyncio.run(run())
+
+
+def test_router_keeps_primary_not_found_when_fallback_errors(tmp_path):
+    class NotFoundPrimary:
+        source = "kurobbs"
+        aliases = {}
+        profile = PROFILES["ww"]
+
+        async def search(self, query, question=""):
+            return {"status": "not_found", "query": query, "message": "未找到"}
+
+        async def read(self, page_id, question="", section="", *, source=""):
+            return {"status": "not_found"}
+
+        async def clear_parse_cache(self):
+            return 0
+
+        def stats(self):
+            return {"upstream_requests": 0, "cache_hits": 0, "errors": {}}
+
+    class BrokenFallback(NotFoundPrimary):
+        async def search(self, query, question=""):
+            raise WikiError("upstream", "BWIKI 服务暂时异常，请稍后重试。")
+
+    async def run():
+        router = WuwaSources(NotFoundPrimary(), BrokenFallback(), timeout=5)
+        result = await router.search("不存在的词")
+        # 主源已判定未找到，兜底源故障不该把结论变成上游错误。
+        assert result["status"] == "not_found"
+        assert result["source_key"] == "kurobbs"
+
+    asyncio.run(run())
+
+
+TREE = {
+    "code": 200,
+    "data": {
+        "id": 9,
+        "name": "全部",
+        "children": [
+            {
+                "id": 1293,
+                "name": "活动合集",
+                "children": [
+                    {"id": 1631, "name": "3.6版本活动", "children": []},
+                    {"id": 1643, "name": "3.7版本活动", "children": []},
+                ],
+            }
+        ],
+    },
+}
+
+
+def activity_handler(request):
+    path = request.url.path
+    if path == "/wiki/core/catalogue/config/getTree":
+        return httpx.Response(200, json=TREE)
+    if path == "/wiki/core/catalogue/item/getPage":
+        form = parse_qs(request.content.decode("utf-8"))
+        cid = int(form["catalogueId"][0])
+        records = {
+            1643: [
+                {"name": "「朝月赠礼」活动说明"},
+                {"name": "「心影映花」活动说明"},
+                {"name": "「朝月赠礼」活动说明"},
+            ]
+        }.get(cid, [])
+        return httpx.Response(
+            200, json={"code": 200, "data": {"results": {"records": records}}}
+        )
+    return httpx.Response(404, json={})
+
+
+def test_current_version_activities_use_the_newest_tree_node(tmp_path):
+    async def run():
+        client = make_client(tmp_path, activity_handler)
+        service = KuroBbsService(client)
+        try:
+            result = await service.search("现在有什么活动")
+            assert result["status"] == "ok"
+            assert result["page_id"] == 900002
+            # 取 id 最大的版本节点（3.7），不是 3.6。
+            assert result["title"] == "3.7版本活动"
+            text = result["evidence"][0]["text"]
+            assert "共 2 项" in text
+            assert "朝月赠礼" in text and "心影映花" in text
+            again = await service.read(900002)
+            assert again["status"] == "ok"
+            assert "3.7版本活动" == again["title"]
+        finally:
+            await client.close()
+
+    asyncio.run(run())
+
+
+def test_activity_item_questions_do_not_hit_the_activity_list(tmp_path):
+    from wiki.kurobbs import _activity_question
+
+    assert _activity_question("现在有什么活动")
+    assert not _activity_question("活动道具有哪些")
+    assert not _activity_question("朝月赠礼活动说明")
