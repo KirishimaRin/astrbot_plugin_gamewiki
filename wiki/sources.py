@@ -90,3 +90,15 @@ class WuwaSources(SourceRouter):
     primary_source = "kurobbs"
     game = "ww"
     game_name = "鸣潮"
+
+    async def search(self, query, question=""):
+        # 主源会在服务层把「今汐满链效果」拆成实体+方面；兜底源收到的是
+        # 原始整串，会搜不到。这里先拆好，两侧用同一对参数。
+        from .kurobbs import _split_aspect
+        from .games import normalize_slang
+
+        query = normalize_slang(query, self.profile)
+        question = normalize_slang(question, self.profile) if question else question
+        if not question:
+            query, question = _split_aspect(query)
+        return await super().search(query, question)

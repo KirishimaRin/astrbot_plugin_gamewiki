@@ -252,13 +252,12 @@ def test_html_text_flattens_tables_and_prose():
 def test_modules_map_to_shared_section_titles_and_extract_voice():
     sections, image = modules_to_sections(DETAIL["data"]["content"]["modules"])
     titles = [s.title for s in sections]
-    assert titles == ["基本信息", "养成推荐", "语音"]
+    # 推荐模块的四个 tab 各自成节，复合问句才不会被武器推荐正文挤掉。
+    assert titles == ["基本信息", "武器推荐", "声骸推荐", "语音"]
     assert image == "https://img.example/lihui.png"
-    guide = sections[1]
-    assert "【武器推荐】" in guide.blocks[0]
-    assert "时和岁稔＞苍鳞千嶂" in guide.blocks[0]
-    assert "毕业配装 | 浮星祛暗2+5" in guide.blocks[1]
-    voice = sections[2]
+    assert "时和岁稔＞苍鳞千嶂" in sections[1].blocks[0]
+    assert "毕业配装 | 浮星祛暗2+5" in sections[2].blocks[0]
+    voice = sections[3]
     assert "心声1 | 你好，漂泊者。" in voice.blocks[0]
 
 
@@ -272,7 +271,7 @@ def test_search_exact_single_hit_auto_reads(tmp_path):
             assert result["title"] == "今汐"
             assert result["page_id"] == 1249040336606580736
             assert result["url"].endswith("/mc/item/1249040336606580736")
-            assert "养成推荐" in result["available_sections"]
+            assert "声骸推荐" in result["available_sections"]
             assert any("浮星祛暗" in item["text"] for item in result["evidence"])
             # 社区帖卡片（kuro-post-component）不进候选。
             assert all("角色攻略" not in c["title"] for c in result["candidates"])
@@ -418,3 +417,92 @@ def test_router_falls_back_to_bwiki(tmp_path):
             await primary.close()
 
     asyncio.run(run())
+
+
+def test_list_catalogue_prefers_the_longer_category_name():
+    from wiki.kurobbs import _list_catalogue
+
+    # 「声骸合鸣有哪些」必须命中合鸣（1219），不能被更短的「声骸」抢走。
+    assert _list_catalogue("声骸合鸣有哪些") == 1219
+    assert _list_catalogue("声骸有哪些") == 1107
+    assert _list_catalogue("武器图鉴") == 1106
+    assert _list_catalogue("今汐") == 0
+
+
+def test_split_aspect_moves_trailing_aspect_into_the_question():
+    from wiki.kurobbs import _split_aspect
+
+    assert _split_aspect("今汐共鸣链效果") == ("今汐", "共鸣链效果")
+    assert _split_aspect("今汐武器") == ("今汐", "武器")
+    # 词条名本身以方面词开头时不拆。
+    assert _split_aspect("声骸系统入门") == ("声骸系统入门", "")
+
+
+def test_level_and_skill_blocks_are_filtered_to_the_asked_one():
+    from wiki.models import Section
+    from wiki.kurobbs import _prefer_level_block, _prefer_skill_block
+
+    level = Section(
+        "等级属性", "", ["【1级】\n基础生命 866", "【90级】\n基础生命 10825"]
+    )
+    _prefer_level_block([level], "毕业面板")
+    assert level.blocks == ["【90级】\n基础生命 10825"]
+
+    skills = Section(
+        "技能详情",
+        "",
+        ["【常态攻击】\n普攻", "【共鸣解放】\n移岁诛邪", "【延奏技能】\n驭时"],
+    )
+    _prefer_skill_block([skills], "共鸣解放倍率")
+    assert skills.blocks == ["【共鸣解放】\n移岁诛邪"]
+
+    skills2 = Section("技能详情", "", ["【常态攻击】\n普攻", "【共鸣解放】\n移岁诛邪"])
+    _prefer_skill_block([skills2], "普攻倍率")
+    assert skills2.blocks == ["【常态攻击】\n普攻"]
+
+
+def test_catalogue_list_reads_the_whole_category(tmp_path):
+    def handler(request):
+        if request.url.path == "/wiki/core/catalogue/item/getPage":
+            return httpx.Response(
+                200,
+                json={
+                    "code": 200,
+                    "data": {
+                        "results": {
+                            "records": [
+                                {"id": 1, "name": "彻空冥雷"},
+                                {"id": 2, "name": "浮星祛暗"},
+                                {"id": 3, "name": "彻空冥雷"},
+                            ]
+                        }
+                    },
+                },
+            )
+        return httpx.Response(404, json={})
+
+    async def run():
+        client = make_client(tmp_path, handler)
+        service = KuroBbsService(client)
+        try:
+            result = await service.search("声骸合鸣", "有哪些")
+            assert result["status"] == "ok"
+            assert result["page_id"] == 1219
+            assert "共 2 项" in result["evidence"][0]["text"]
+            assert "彻空冥雷" in result["evidence"][0]["text"]
+            # page_id 是分类号，补读可重建同一份清单。
+            again = await service.read(1219)
+            assert again["status"] == "ok"
+            assert "浮星祛暗" in again["evidence"][0]["text"]
+        finally:
+            await client.close()
+
+    asyncio.run(run())
+
+
+def test_profile_aliases_apply_to_the_kurobbs_service(tmp_path):
+    client = make_client(tmp_path, kuro_handler(SEARCH_RECORDS))
+    service = KuroBbsService(client)
+    assert service.aliases["汐汐"] == "今汐"
+    assert service.aliases["深塔"] == "逆境深塔"
+    asyncio.run(client.close())

@@ -25,7 +25,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from .client import WikiClient
-from .games import WW
+from .games import WW, aspect_words, normalize_slang
 from .models import Section, WikiError
 from .selection import evidence
 
@@ -36,9 +36,27 @@ SEARCH = "/wiki/core/catalogue/item/search"
 DETAIL = "/wiki/core/catalogue/item/getEntryDetail"
 MAX_BYTES = 8 << 20
 
-# 搜索返回目录卡片而非词条本体；这些 type 才是可读词条，其余是社区帖/
-# 视频/短视频卡片，正文不在 wiki 词条里。
-CARD_TYPES = {"vertical-figure", "square-figure", "strategy-component"}
+# 搜索返回目录卡片而非词条本体；这些 type 是可读词条（竖图/方图/横图/
+# 攻略卡/文本列表卡都指向正式词条），其余（kuro-post-component 等社区帖/
+# 视频卡）正文不在 wiki 词条里。此前只收竖图/方图，导致「声骸系统详解」
+# 「深坠异想奇境」「索拉等级提升」这类横图/文本列表词条被整体漏掉。
+CARD_TYPES = {
+    "vertical-figure",
+    "square-figure",
+    "horizontal-figure",
+    "strategy-component",
+    "text-list-small",
+}
+
+# 图鉴清单（getPage 的 catalogueId）；page_id 直接用分类号，read 时还原。
+CATALOGUES = {
+    1105: ("共鸣者", "角色"),
+    1106: ("武器",),
+    1107: ("声骸",),
+    1219: ("合鸣效果", "声骸合鸣"),
+    1158: ("敌人", "怪物"),
+}
+LIST_WORDS = ("有哪些", "图鉴", "列表", "一览", "全部", "所有")
 
 # 库街区标题用「玉冥蛇（声骸）」「头像『今汐』」类后缀标注条目种类；
 # 精确名比较剥掉末尾括注，展示仍用完整标题。
@@ -47,6 +65,109 @@ _SUFFIX = re.compile(r"（[^（）]*）$")
 
 def _name_key(name):
     return _SUFFIX.sub("", name).strip()
+
+
+# 直接调用工具时，模型常把「声骸系统是什么」「新手怎么玩」整句塞进 query。
+_QUESTION_SUFFIX = re.compile(
+    r"(?:是什么意思|是什么|有什么用|怎么玩|怎么用|怎么样|怎么刷|哪里刷|在哪刷)$"
+)
+
+
+def _strip_question_suffix(query):
+    if len(query) <= 3:
+        return query
+    stripped = _QUESTION_SUFFIX.sub("", query).strip()
+    return stripped if len(stripped) >= 2 else query
+
+
+_LEVEL_HINT = re.compile(r"(\d{1,2})\s*级")
+# 技能 tab 名；「普攻」在鸣潮 tab 里叫「常态攻击」。
+SKILL_TABS = (
+    "常态攻击",
+    "共鸣技能",
+    "共鸣回路",
+    "共鸣解放",
+    "变奏技能",
+    "延奏技能",
+    "谐度破坏",
+)
+SKILL_SYNONYMS = (("普攻", "常态攻击"), ("普通攻击", "常态攻击"))
+
+
+def _prefer_level_block(sections, question):
+    """「90级面板」「毕业面板」先给对应等级那一块，而不是 1 级。"""
+    text = question or ""
+    match = _LEVEL_HINT.search(text)
+    if match:
+        level = match.group(1)
+    elif "满级" in text or "毕业" in text:
+        level = "90"
+    else:
+        return
+    marker = f"【{level}级】"
+    for section in sections:
+        if section.title != "等级属性":
+            continue
+        # evidence 会按问题词重排 block，预排序会被覆盖；问具体等级时只留
+        # 那一块，避免答案里先出现 1 级数值。
+        matched = [block for block in section.blocks if block.startswith(marker)]
+        if matched:
+            section.blocks = matched
+
+
+def _prefer_skill_block(sections, question):
+    """「共鸣解放倍率」先给共鸣解放那一块，而不是第一个技能 tab。"""
+    text = question or ""
+    wanted = [name for name in SKILL_TABS if name in text]
+    for alias, name in SKILL_SYNONYMS:
+        if alias in text and name not in wanted:
+            wanted.append(name)
+    if not wanted:
+        return
+    wanted.sort(key=len, reverse=True)
+    for section in sections:
+        if section.title not in {"技能详情", "技能"}:
+            continue
+        # 同上：问具体技能时只留对应 tab，避免「共鸣解放倍率」先给共鸣回路。
+        picked = []
+        for name in wanted:
+            marker = f"【{name}】"
+            picked.extend(block for block in section.blocks if block.startswith(marker))
+        if picked:
+            section.blocks = picked
+
+
+def _split_aspect(query):
+    """Split a trailing aspect word when the caller supplied no question.
+
+    The command path normally splits entity and aspect before searching; AI
+    tool calls often pass “今汐满链效果” as the whole query. Splitting here
+    keeps both paths on the same sections.
+    """
+    for word in aspect_words():
+        index = query.find(word)
+        if index >= 2:
+            return query[:index], query[index:]
+    return query, ""
+
+
+def _list_catalogue(text):
+    """Return the catalogue id when the question asks for a whole category.
+
+    按名称长度从长到短匹配：「声骸合鸣有哪些」要先命中合鸣，不能被更短的
+    「声骸」抢走。
+    """
+    if not any(word in text for word in LIST_WORDS):
+        return 0
+    ranked = sorted(
+        ((name, cid) for cid, names in CATALOGUES.items() for name in names),
+        key=lambda pair: len(pair[0]),
+        reverse=True,
+    )
+    for name, cid in ranked:
+        if name in text:
+            return cid
+    return 0
 
 
 def _prefer_kind(entries, question):
@@ -72,22 +193,22 @@ def _prefer_kind(entries, question):
     return sorted(entries, key=lambda e: 0 if f"（{suffix}）" in label(e) else 1)
 
 
-# BWIKI 模板独有、库街区词条没有的数据：问法命中且本站无对应分节时，
-# 交给路由的 BWIKI 兜底（等级属性表/共鸣链表/基本资料模板行）。
-_BWIKI_ONLY_SECTIONS = (
-    (("面板", "基础属性", "属性", "生命", "攻击", "防御", "等级"), "基础属性"),
-    (("共鸣链",), "共鸣链"),
-    (("生日", "CV", "声优", "身高"), "基本资料"),
-    (("突破材料", "养成材料", "突破消耗", "培养材料"), "基础属性"),
-)
-
-
 def _prefers_bwiki(question, available_sections):
+    """Whether BWIKI has a section this kurobbs entry lacks.
+
+    库街区角色词条没有共鸣链模块；武器词条没有「可用角色」（BWIKI 武器页
+    有）。等级属性、突破材料、CV 库街区都有，不要再往 BWIKI 推——BWIKI
+    渲染页并不输出这些模板参数。
+    """
+    text = question or ""
     titles = "\n".join(available_sections)
-    return any(
-        word in (question or "") and section not in titles
-        for words, section in _BWIKI_ONLY_SECTIONS
-        for word in words
+    if "共鸣链" in text and "共鸣链" not in titles:
+        return True
+    weapon_like = "突破材料" in titles and "技能详情" not in titles
+    return (
+        weapon_like
+        and any(word in text for word in ("谁用", "适合谁", "给谁", "可用角色"))
+        and "可用角色" not in titles
     )
 
 
@@ -95,13 +216,17 @@ def _prefers_bwiki(question, available_sections):
 # intents/specifics 在两个来源上命中同一语义的分节。
 MODULE_TITLES = {
     "基础资料": "基本信息",
+    "武器信息": "基本信息",
     "角色养成": "技能详情",
     "角色养成推荐": "养成推荐",
     "角色档案": "档案",
     "角色语音": "语音",
-    "武器信息": "基本信息",
-    "突破材料": "突破数值",
+    "突破材料": "突破材料",
 }
+
+# 推荐模块的 tab 各自成节，否则「声骸搭配」「配队」会在同一个大分节里
+# 被武器推荐正文挤掉（evidence 按块打分，复合问句命中不了整块）。
+GUIDE_TABS = ("武器推荐", "声骸推荐", "配队推荐", "技能加点推荐")
 
 
 class KuroBbsClient(WikiClient):
@@ -247,25 +372,122 @@ def _component_blocks(component):
     return blocks
 
 
+def _tabs(module):
+    """Yield (title, text) for every tab that carries text."""
+    for component in module.get("components") or []:
+        for tab in component.get("tabs") or []:
+            title = str(tab.get("title") or "").strip()
+            body = html_text(tab.get("content"))
+            if body:
+                yield title, body
+
+
+def _media_blocks(module):
+    """语音模块：正文在 mediaTabs[].mediaList[]（音频条目带台词文本）。"""
+    blocks = []
+    for component in module.get("components") or []:
+        for tab in component.get("mediaTabs") or []:
+            title = str(tab.get("title") or "").strip()
+            lines = [
+                f"{item.get('audioTitle', '')} | {item.get('content', '').strip()}"
+                for item in tab.get("mediaList") or []
+                if item.get("content")
+            ]
+            if lines:
+                body = "\n".join(lines)
+                blocks.append(f"【{title}】\n{body}" if title else body)
+    return blocks
+
+
+def _role_block(module):
+    """基础资料的角色信息行（性别/出生/武器/属性/身份/CV…）。"""
+    for component in module.get("components") or []:
+        role = component.get("role")
+        if isinstance(role, dict):
+            lines = [str(role.get("title") or "").strip()]
+            lines += [
+                str(item.get("text") or "").strip()
+                for item in role.get("info") or []
+                if item.get("text")
+            ]
+            block = "\n".join(line for line in lines if line)
+            if block:
+                return block
+    return ""
+
+
+def _figure_url(module):
+    for component in module.get("components") or []:
+        role = component.get("role")
+        if isinstance(role, dict):
+            for figure in role.get("figures") or []:
+                url = figure.get("verticalFigureUrl") or figure.get("url")
+                if url:
+                    return url
+    return ""
+
+
 def modules_to_sections(modules):
-    """Map wiki modules to shared section titles; return (sections, image)."""
+    """Map wiki modules to shared section titles; return (sections, image).
+
+    角色词条的分节按「玩家会问什么」切，而不是按模块整块给：
+    基础资料拆出 基本信息/等级属性/服饰，角色养成拆出 技能详情/突破材料，
+    角色养成推荐的四个 tab 各自成节（武器/声骸/配队/技能加点），
+    否则复合问句会被同节里的武器推荐正文挤掉。
+    """
     sections, image = [], ""
     for module in modules or []:
         raw_title = str(module.get("title") or "").strip() or "基本信息"
+        image = image or _figure_url(module)
+        if raw_title == "基础资料":
+            role = _role_block(module)
+            if role:
+                sections.append(Section("基本信息", "", [role]))
+            levels, outfits = [], []
+            for title, body in _tabs(module):
+                if title.isdigit():
+                    levels.append(f"【{title}级】\n{body}")
+                else:
+                    outfits.append(f"【{title}】\n{body}")
+            if levels:
+                sections.append(Section("等级属性", "", levels))
+            if outfits:
+                sections.append(Section("服饰", "", outfits))
+            continue
+        if raw_title == "角色养成":
+            skills, ascension = [], []
+            for title, body in _tabs(module):
+                target = ascension if title.endswith("突破") else skills
+                target.append(f"【{title}】\n{body}")
+            if skills:
+                sections.append(Section("技能详情", "", skills))
+            if ascension:
+                sections.append(Section("突破材料", "", ascension))
+            continue
+        if raw_title == "角色养成推荐":
+            for title, body in _tabs(module):
+                name = title if title in GUIDE_TABS else "养成推荐"
+                sections.append(Section(name, "", [body]))
+            continue
+        if raw_title == "角色档案":
+            blocks = [
+                f"【{tab_title}】\n{body}" if tab_title else body
+                for tab_title, body in _tabs(module)
+            ]
+            if blocks:
+                sections.append(Section("档案", "", blocks))
+            continue
+        if raw_title == "角色语音":
+            blocks = _media_blocks(module)
+            if blocks:
+                sections.append(Section("语音", "", blocks))
+            continue
         title = MODULE_TITLES.get(raw_title, raw_title)
         blocks = []
         for component in module.get("components") or []:
             blocks.extend(_component_blocks(component))
-            role = component.get("role")
-            if isinstance(role, dict) and not image:
-                figures = role.get("figures") or []
-                for figure in figures:
-                    url = figure.get("verticalFigureUrl") or figure.get("url")
-                    if url:
-                        image = url
-                        break
         if blocks:
-            sections.append(Section(title=title, anchor="", blocks=blocks))
+            sections.append(Section(title, "", blocks))
     return sections, image
 
 
@@ -287,7 +509,7 @@ class KuroBbsService:
         # normalization; this service is the ww primary, so it must carry
         # the same contract as QueryService and AkeService.
         self.profile = WW
-        self.aliases = {**(aliases or {})}
+        self.aliases = {**WW.site_aliases, **(aliases or {})}
         self.search_ttl, self.page_ttl = search_ttl, page_ttl
         self.max_chars, self.timeout = max_chars, timeout
         # 雪花ID 直接作 page_id（int64 内），无需编码方案。
@@ -319,7 +541,21 @@ class KuroBbsService:
     async def search(self, query, question=""):
         query = self._validate(query, 100)
         question = self._validate(question, 300) if question else ""
-        return await self._guard(self._search(self.aliases.get(query, query), question))
+        # 与命令路径同一套归一：AI 工具可能把「今汐满链效果」整串塞进
+        # query，question 也可能带着未归一的「六链/0链」。服务层再归一一次，
+        # 保证直接调用服务时与命令路径看到同样的分节。
+        raw_question = question
+        query = _strip_question_suffix(self.aliases.get(query, query))
+        query = normalize_slang(query, self.profile)
+        question = normalize_slang(question, self.profile)
+        if not question:
+            query, question = _split_aspect(query)
+        # 「毕业面板」的“毕业”被全局黑话删掉后失去等级线索，补回 90 级。
+        if any(word in raw_question for word in ("毕业", "满级")) and any(
+            word in raw_question for word in ("面板", "属性", "等级", "数值")
+        ):
+            question = f"{question} 90级"
+        return await self._guard(self._search(query, question))
 
     async def read(self, page_id, question="", section="", *, source=""):
         if source and source != "kurobbs":
@@ -342,6 +578,9 @@ class KuroBbsService:
             ) from None
 
     async def _search(self, query, question):
+        catalogue = _list_catalogue(f"{query}\n{question}")
+        if catalogue:
+            return await self._catalogue_list(catalogue, query, question)
         data = await self.client.get(
             SEARCH, {"data": {"keyword": query}}, self.search_ttl
         )
@@ -377,6 +616,13 @@ class KuroBbsService:
                 "message": f"未找到相关{self.profile.name}词条。",
             }
         exact = [entry for entry in entries if _name_key(entry["name"]) == query]
+        if not exact and len(query) >= 3:
+            # 唯一的“查询词是标题前缀”候选可直接读：「声骸系统」→「声骸系统
+            # 详解」、「索拉等级」→「索拉等级提升・一」。多条前缀候选仍让
+            # 用户选，避免把「新手」误配到某一篇攻略。
+            prefixed = [e for e in entries if _name_key(e["name"]).startswith(query)]
+            if len(prefixed) == 1:
+                exact = prefixed
         if not exact:
             return {
                 **base,
@@ -401,6 +647,83 @@ class KuroBbsService:
         result["source_urls"] = [result["url"]]
         return result
 
+    async def _catalogue_list(self, catalogue_id, query, question):
+        """List every entry in one 图鉴 category (声骸/武器/共鸣者/…).
+
+        Uses the catalogue page endpoint; page_id is the catalogue id itself
+        so 追问/补读 can rebuild the same list without a synthetic encoding.
+        """
+        names = CATALOGUES.get(catalogue_id) or ()
+        label = names[0] if names else "图鉴"
+        data = await self.client.get(
+            "/wiki/core/catalogue/item/getPage",
+            {"data": {"catalogueId": catalogue_id, "page": 1, "limit": 300}},
+            self.page_ttl,
+        )
+        records = (data.get("results") or {}).get("records") or []
+        entries, seen = [], set()
+        for record in records:
+            name = str(record.get("name") or "").strip()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            entries.append(name)
+        if not entries:
+            return {
+                "status": "not_found",
+                "query": query,
+                "question": question,
+                "game": "ww",
+                "message": f"未找到{label}列表。",
+            }
+        section_title = f"{label}列表"
+        sections = [
+            Section(
+                section_title,
+                "",
+                [f"共 {len(entries)} 项\n" + "\n".join(entries)],
+            )
+        ]
+        url = f"https://wiki.kurobbs.com/mc/catalogue/list?catalogueId={catalogue_id}"
+        snippets, truncated, selection = evidence(
+            sections,
+            "",
+            self.max_chars,
+            "",
+            section_title,
+            self.profile.intents,
+            self.profile.specifics,
+        )
+        for snippet in snippets:
+            snippet.pop("anchor", None)
+            snippet["url"] = url
+        return {
+            "status": "ok" if snippets else "section_not_found",
+            "game": "ww",
+            "source": f"{self.profile.name} 库街区",
+            "source_key": "kurobbs",
+            "query": query,
+            "question": question,
+            "title": section_title,
+            "page_id": catalogue_id,
+            "url": url,
+            "source_urls": [url],
+            "image_url": "",
+            "revision_id": 0,
+            "data_version": "",
+            "published_at": "",
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "available_sections": [section_title],
+            "related_pages": [],
+            "evidence": snippets,
+            "truncated": truncated,
+            "selection": selection,
+            "instructions": (
+                f"这是{label}的完整清单，按清单回答数量与名称，不要编造未列出的条目；"
+                "末尾附 source_urls。"
+            ),
+        }
+
     async def _probe_titles(self, candidates, query):
         """Attach the real detail title to each candidate; drop unresolvable."""
         probed = []
@@ -414,11 +737,28 @@ class KuroBbsService:
                 continue
             content = data.get("content") or {}
             title = str(content.get("title") or entry["name"]).strip()
-            probed.append({**entry, "detail_title": title})
+            probed.append(
+                {
+                    **entry,
+                    "detail_title": title,
+                    "module_count": len(content.get("modules") or []),
+                }
+            )
         matched = [
             entry for entry in probed if _name_key(entry["detail_title"]) == query
         ]
-        return matched or probed
+        if matched:
+            return matched
+        # 词条页常把同名条目写成「逆境深塔-加载页面 / -教程百科」这类后缀
+        # 标题；精确名对不上时，优先详情标题以查询词开头的候选，并让内容
+        # 模块更多的排在前面（加载页面只有一块纯文本）。
+        prefixed = [
+            entry
+            for entry in probed
+            if _name_key(entry["detail_title"]).startswith(query)
+        ]
+        prefixed.sort(key=lambda entry: entry.get("module_count", 0), reverse=True)
+        return prefixed or probed
 
     @staticmethod
     def _candidate(entry):
@@ -430,6 +770,8 @@ class KuroBbsService:
         }
 
     async def _read(self, entry_id, question, section):
+        if entry_id in CATALOGUES:
+            return await self._catalogue_list(entry_id, "", question)
         data = await self.client.get(
             DETAIL, {"data": {"id": str(entry_id)}}, self.page_ttl
         )
@@ -437,6 +779,8 @@ class KuroBbsService:
         sections, image = modules_to_sections(content.get("modules"))
         title = str(content.get("title") or data.get("name") or "未知条目").strip()
         url = self._url(entry_id)
+        _prefer_level_block(sections, question)
+        _prefer_skill_block(sections, question)
         available = list(dict.fromkeys(s.title for s in sections))
         snippets, truncated, selection = evidence(
             sections,
@@ -447,15 +791,27 @@ class KuroBbsService:
             self.profile.intents,
             self.profile.specifics,
         )
+        if snippets and selection.get("mode") == "fallback":
+            # 没有任何分节对上问法时，与其给正文里偶然命中关键词的分节
+            # （“生日”命中语音台词），不如退回基本信息概览。
+            intro, cut, intro_selection = evidence(
+                sections,
+                "",
+                self.max_chars,
+                "基本信息",
+                title,
+                self.profile.intents,
+                self.profile.specifics,
+            )
+            if intro:
+                snippets, truncated = intro, cut
+                selection = {**intro_selection, "mode": "fallback_intro"}
         for snippet in snippets:
             snippet.pop("anchor", None)
             snippet["url"] = url
         status = "ok" if snippets else "section_not_found"
         if _prefers_bwiki(question, available):
-            # 库街区词条没有等级属性表/共鸣链表/生日 CV 等模板数据：这些
-            # 问法在本站只能泛泛回退，交 BWIKI 兜底才有对应分节。
-            status = "section_not_found"
-        elif snippets and selection.get("mode") == "fallback":
+            # 库街区角色词条没有共鸣链模块，链效果只在 BWIKI 模板里。
             status = "section_not_found"
         return {
             "status": status,
