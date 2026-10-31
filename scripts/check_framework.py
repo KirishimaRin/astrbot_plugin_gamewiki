@@ -277,7 +277,25 @@ async def main():
             assert event.sent[0].startswith("正在查询")
         assert registered == [
             (name, None) for name in ("ys", "sr", "zzz", "ark", "zmd", "sts2", "ww")
+        ] + [
+            ("wikihelp", {"wiki_help", "WIKIHELP", "WIKI_HELP"}),
+            ("op", {"OP", "Op", "oP"}),
         ]
+        for name in ("wikihelp", "wiki_help", "WIKIHELP", "WIKI_HELP"):
+            event = Event(name)
+            assert filters[-2].filter(event, {}), name
+            assert [r async for r in plugin.wiki_command_help(event)] == []
+            assert "/ys 原神" in event.sent[0], name
+        for name in ("op", "OP", "Op", "oP"):
+            event = Event(f"{name} STATS")
+            assert filters[-1].filter(event, {}), name
+            denied = [r async for r in plugin.wiki_command_op(event)]
+            assert len(denied) == 1 and "管理员" in denied[0], name
+            event.is_admin = lambda: True
+            assert [r async for r in plugin.wiki_command_op(event)] == []
+            assert len(event.sent) == 1 and "百科运行统计" in event.sent[0], name
+        for invalid in ("wikihelpers", "wiki_help_extra", "OPERATOR"):
+            assert not any(f.filter(Event(invalid), {}) for f in filters), invalid
         for old in (
             "原神百科",
             "yswiki",
@@ -296,11 +314,16 @@ async def main():
             assert not any(f.filter(Event(old + " 测试"), {}) for f in filters), old
         help_event = Event("ys")
         result = [r async for r in plugin.wiki_command_ys(help_event)]
-        assert result == [] and "用法" in help_event.sent[0]
-        assert "\n例：" in help_event.sent[0]
-        admin_event = Event("ys stats")
+        assert result == [] and help_event.sent == ["查看统一帮助：/wikihelp"]
+        help_event = Event("wikihelp")
+        assert filters[-2].filter(help_event, {})
+        assert [r async for r in plugin.wiki_command_help(help_event)] == []
+        assert "/ys 原神" in help_event.sent[0]
+        assert f"/sr {module.PROFILES['sr'].name}" in help_event.sent[0]
+        admin_event = Event("op stats")
+        assert filters[-1].filter(admin_event, {})
         admin_event.is_admin = lambda: True
-        assert [r async for r in plugin.wiki_command_ys(admin_event)] == []
+        assert [r async for r in plugin.wiki_command_op(admin_event)] == []
         assert len(admin_event.sent) == 1 and "\n限流窗口：" in admin_event.sent[0]
         result = [r async for r in plugin.wiki_command_zmd(Event("zmd 流萤"))]
         assert "未启用" in result[0], "zmd is not in the config games list"
@@ -331,11 +354,11 @@ async def main():
             assert "\n\n【章节甲】\n\n" in reply, code
             assert "\n\n来源：\nhttps://" in reply, code
             for word in ("stats", "clear-cache"):
-                denied = [r async for r in handler(Event(f"{profile.command} {word}"))]
+                denied = [r async for r in plugin.wiki_command_op(Event(f"op {word}"))]
                 assert "管理员" in denied[0], (code, word)
-                admin = Event(f"{profile.command} {word}")
+                admin = Event(f"op {word}")
                 admin.is_admin = lambda: True
-                response = [r async for r in handler(admin)]
+                response = [r async for r in plugin.wiki_command_op(admin)]
                 assert (
                     (admin.sent and "百科运行统计" in admin.sent[0])
                     if word == "stats"
@@ -343,7 +366,7 @@ async def main():
                 )
             help_event = Event(f"{profile.command} help")
             assert [r async for r in handler(help_event)] == []
-            assert f"/{profile.command} help" in help_event.sent[0]
+            assert help_event.sent == ["查看统一帮助：/wikihelp"]
 
         class ModelContext:
             calls = []
@@ -436,7 +459,7 @@ async def main():
                     "llm_tool docstring Args format",
                     "real decorator schemas",
                     "real all-message decorator and event type filter",
-                    "seven English-only commands and removed aliases",
+                    "seven game commands, wikihelp and op commands and removed aliases",
                     "multi-game commands and routing",
                     "multi-word command",
                     "formatted command sent once without result re-segmentation",

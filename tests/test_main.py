@@ -55,13 +55,21 @@ def _install_stubs(data_dir: str):
 
         return decorate
 
+    def command(name, alias=None):
+        def decorate(handler):
+            handler.command_name = name
+            handler.command_aliases = alias or set()
+            return handler
+
+        return decorate
+
     install("astrbot")
     install("astrbot.api", AstrBotConfig=dict, logger=__import__("logging"))
     install(
         "astrbot.api.event",
         AstrMessageEvent=Event,
         filter=SimpleNamespace(
-            command=passthrough,
+            command=command,
             event_message_type=passthrough,
             EventMessageType=SimpleNamespace(ALL=1),
             llm_tool=passthrough,
@@ -321,7 +329,7 @@ def test_session_override_persists_to_data_dir(plugin):
     instance, Event, _ = plugin
 
     async def admin(arg):
-        event = Event(f"ys session {arg}", origin="test:GroupMessage:7", admin=True)
+        event = Event(f"op session {arg}", origin="test:GroupMessage:7", admin=True)
         async for _ in instance._admin_action(event, "session"):
             pass
         return event
@@ -338,7 +346,7 @@ def test_session_override_persists_to_data_dir(plugin):
 
 
 @pytest.mark.parametrize("game", ["ys", "sr", "zzz", "arknights", "zmd", "sts2"])
-def test_public_commands_can_disable_inspect_and_restore_session(plugin, game):
+def test_op_can_disable_inspect_and_restore_game_sessions(plugin, game):
     instance, Event, module = plugin
     profile = module.PROFILES[game]
 
@@ -346,8 +354,8 @@ def test_public_commands_can_disable_inspect_and_restore_session(plugin, game):
         handler = getattr(instance, f"wiki_command_{game}")
         instance._limited = lambda *args, **kwargs: pytest.fail("admin consumed quota")
         for argument, expected in (("off", False), ("status", False), ("on", True)):
-            event = Event(f"{profile.command} session {argument}", admin=True)
-            assert [r async for r in handler(event)] == []
+            event = Event(f"op session {argument}", admin=True)
+            assert [r async for r in instance.wiki_command_op(event)] == []
             assert instance.session_overrides[event.unified_msg_origin] is expected
             assert len(event.sent) == 1
             assert ("开启" if expected else "关闭") in event.sent[0]
@@ -355,14 +363,14 @@ def test_public_commands_can_disable_inspect_and_restore_session(plugin, game):
                 query = Event(f"{profile.command} 纳西妲")
                 assert "未启用" in [r async for r in handler(query)][0]
 
-        denied = Event(f"{profile.command} session off")
-        assert "管理员" in [r async for r in handler(denied)][0]
+        denied = Event("op session off")
+        assert "管理员" in [r async for r in instance.wiki_command_op(denied)][0]
         assert instance._allowed(denied)
-        invalid = Event(f"{profile.command} session invalid", admin=True)
-        assert [r async for r in handler(invalid)] == []
+        invalid = Event("op session invalid", admin=True)
+        assert [r async for r in instance.wiki_command_op(invalid)] == []
         assert "用法" in invalid.sent[0]
-        status = Event(f"{profile.command} session", admin=True)
-        assert [r async for r in handler(status)] == []
+        status = Event("op session", admin=True)
+        assert [r async for r in instance.wiki_command_op(status)] == []
         assert "开启" in status.sent[0]
 
     asyncio.run(check())
@@ -384,8 +392,8 @@ def test_session_switch_survives_reload_for_all_directory_layouts(plugin, layout
         first = type(instance)(object(), {})
         second = None
         try:
-            event = Event("ys session off", admin=True)
-            assert [r async for r in first.wiki_command_ys(event)] == []
+            event = Event("op session off", admin=True)
+            assert [r async for r in first.wiki_command_op(event)] == []
             selected = (
                 "genshinimpactsearch"
                 if layout == "legacy"
@@ -440,9 +448,9 @@ def test_failed_session_save_keeps_previous_file_and_notifies_admin(plugin):
     original = (instance.data_dir / "session-overrides.json").read_bytes()
 
     async def check():
-        event = Event("ys session off", admin=True)
+        event = Event("op session off", admin=True)
         with patch.object(Path, "replace", side_effect=OSError("read-only")):
-            assert [r async for r in instance.wiki_command_ys(event)] == []
+            assert [r async for r in instance.wiki_command_op(event)] == []
         assert "仅本次运行生效" in event.sent[0]
         assert not instance._allowed(event)
         assert (instance.data_dir / "session-overrides.json").read_bytes() == original
@@ -758,18 +766,18 @@ def test_doctor_handles_provider_timeout_and_cache_failure(plugin):
         await asyncio.sleep(1)
 
     instance.context = SimpleNamespace(get_current_chat_provider_id=slow)
-    event = Event("ys doctor", admin=True)
-    assert asyncio.run(_collect(instance.wiki_command_ys(event))) == []
+    event = Event("op doctor", admin=True)
+    assert asyncio.run(_collect(instance.wiki_command_op(event))) == []
     assert "读取失败" in event.sent[0] and "缓存读取：失败" in event.sent[0]
 
 
 @pytest.mark.parametrize("whitelist_allows", [False, True])
 def test_session_reset_restores_config_and_persists(plugin, whitelist_allows):
     instance, Event, _ = plugin
-    event = Event("ys session reset", admin=True)
+    event = Event("op session reset", admin=True)
     instance.sessions = {event.unified_msg_origin} if whitelist_allows else {"other"}
     instance.session_overrides[event.unified_msg_origin] = not whitelist_allows
-    assert asyncio.run(_collect(instance.wiki_command_ys(event))) == []
+    assert asyncio.run(_collect(instance.wiki_command_op(event))) == []
     assert instance._allowed(event) is whitelist_allows
     assert "跟随配置" in event.sent[0] and "配置白名单" in event.sent[0]
     assert instance._load_session_overrides(instance.data_dir) == {}
@@ -784,12 +792,12 @@ def test_doctor_is_admin_only_local_and_reports_degradation(plugin):
         client._fetch = AsyncMock(side_effect=AssertionError("unexpected network"))
 
     async def check():
-        denied = await _collect(instance.wiki_command_ys(Event("ys doctor")))
+        denied = await _collect(instance.wiki_command_op(Event("op doctor")))
         assert "管理员" in denied[0]
         provider.assert_not_awaited()
-        event = Event("ys doctor", admin=True)
+        event = Event("op doctor", admin=True)
         instance.session_overrides[event.unified_msg_origin] = False
-        assert await _collect(instance.wiki_command_ys(event)) == []
+        assert await _collect(instance.wiki_command_op(event)) == []
         assert "ys, sr" in event.sent[0]
         assert "缓存读取：正常" in event.sent[0] and "目录写入：正常" in event.sent[0]
         assert "未验证实际调用" in event.sent[0] and "数字校验" in event.sent[0]
@@ -797,8 +805,8 @@ def test_doctor_is_admin_only_local_and_reports_degradation(plugin):
         for client in instance.clients:
             client._fetch.assert_not_awaited()
         provider.side_effect = RuntimeError("private-provider-detail")
-        event = Event("ys doctor", admin=True)
-        await _collect(instance.wiki_command_ys(event))
+        event = Event("op doctor", admin=True)
+        await _collect(instance.wiki_command_op(event))
         assert (
             "读取失败" in event.sent[0]
             and "private-provider-detail" not in event.sent[0]
@@ -813,7 +821,7 @@ def test_clear_cache_clears_shared_http_cache_once(plugin):
     for service in instance.services.values():
         service.clear_parse_cache = AsyncMock(return_value=2)
     replies = asyncio.run(
-        _collect(instance.wiki_command_ys(Event("ys clear-cache", admin=True)))
+        _collect(instance.wiki_command_op(Event("op clear-cache", admin=True)))
     )
     instance.cache.clear.assert_awaited_once()
     assert "HTTP 条目 7 条" in replies[0] and "已解析页面 4 个" in replies[0]
@@ -951,7 +959,7 @@ def test_doctor_reports_the_plugin_directory_font(plugin):
     directory.mkdir(parents=True)
     font = directory / "MiSans-Regular.ttf"
     font.write_bytes(regular.read_bytes())
-    text = asyncio.run(instance._doctor_text(Event("ys doctor")))
+    text = asyncio.run(instance._doctor_text(Event("op doctor")))
     assert str(directory) in text
     assert str(font) in text
     assert "DejaVu Sans" in text
@@ -1150,9 +1158,9 @@ def test_query_notice_is_skipped_for_help(plugin):
     instance, Event, _ = plugin
     configured = type(instance)(object(), {"games": ["ys"]})
     try:
-        event = Event("ys help")
-        asyncio.run(_collect(configured.wiki_command_ys(event)))
-        assert len(event.sent) == 1 and "用法：" in event.sent[0]
+        event = Event("wikihelp")
+        asyncio.run(_collect(configured.wiki_command_help(event)))
+        assert len(event.sent) == 1 and "游戏指令：" in event.sent[0]
     finally:
         asyncio.run(configured.terminate())
 
@@ -1195,3 +1203,122 @@ def test_sts2_image_send_requests_webp_conversion(plugin):
             )
         )
     assert seen.get("convert_webp") is True
+
+
+@pytest.mark.parametrize("game", list(PROFILES))
+@pytest.mark.parametrize("tail", ["", " help"])
+def test_game_help_redirects_without_search_or_model(plugin, game, tail):
+    instance, Event, _ = plugin
+    for service in instance.services.values():
+        service.search = AsyncMock(side_effect=AssertionError("help must not search"))
+    event = Event(f"{PROFILES[game].command}{tail}")
+    handler = getattr(instance, f"wiki_command_{game}")
+    assert asyncio.run(_collect(handler(event))) == []
+    assert event.sent == ["查看统一帮助：/wikihelp"]
+    for service in instance.services.values():
+        service.search.assert_not_awaited()
+
+
+def test_unified_help_lists_enabled_games_and_shared_actions(plugin):
+    instance, Event, _ = plugin
+    event = Event("wikihelp")
+    assert asyncio.run(_collect(instance.wiki_command_help(event))) == []
+    assert len(event.sent) == 1
+    text = event.sent[0]
+    for code, profile in PROFILES.items():
+        assert (f"/{profile.command} {profile.name}" in text) == (
+            code in instance.services
+        )
+    assert text.count("/op stats：") == 1
+    assert "session on|off" in text and "session status|reset" in text
+
+
+def test_unified_help_rejects_unknown_arguments_and_respects_whitelist(plugin):
+    instance, Event, _ = plugin
+    event = Event("wikihelp stats", admin=True)
+    assert asyncio.run(_collect(instance.wiki_command_help(event))) == []
+    assert event.sent == ["用法：/wikihelp"]
+    instance.sessions = {"another-session"}
+    denied = asyncio.run(_collect(instance.wiki_command_help(Event("wikihelp"))))
+    assert len(denied) == 1 and "当前会话未启用" in denied[0]
+
+
+@pytest.mark.parametrize("game", list(PROFILES))
+@pytest.mark.parametrize("action", ["stats", "clear-cache", "doctor", "session off"])
+def test_game_admin_parameters_only_redirect_to_op(plugin, game, action):
+    instance, Event, _ = plugin
+    instance._admin_action = AsyncMock(side_effect=AssertionError("old admin entry"))
+    event = Event(f"{PROFILES[game].command} {action}", admin=True)
+    handler = getattr(instance, f"wiki_command_{game}")
+    assert asyncio.run(_collect(handler(event))) == []
+    assert event.sent == [f"管理指令请使用：/op {action}"]
+    instance._admin_action.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "tail", ["", "unknown", "stats extra", "clear-cache extra", "doctor extra"]
+)
+def test_op_invalid_arguments_do_not_execute_actions(plugin, tail):
+    instance, Event, _ = plugin
+    instance._admin_action = AsyncMock(side_effect=AssertionError("unexpected action"))
+    replies = asyncio.run(
+        _collect(instance.wiki_command_op(Event(f"op {tail}", admin=True)))
+    )
+    assert len(replies) == 1 and replies[0].startswith("用法：/op")
+    instance._admin_action.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "tail", ["", "stats", "clear-cache", "doctor", "session on", "unknown"]
+)
+def test_op_rejects_non_admin_before_dispatch(plugin, tail):
+    instance, Event, _ = plugin
+    instance._admin_action = AsyncMock(side_effect=AssertionError("unexpected action"))
+    replies = asyncio.run(_collect(instance.wiki_command_op(Event(f"op {tail}"))))
+    assert len(replies) == 1 and "仅限 AstrBot 管理员" in replies[0]
+    instance._admin_action.assert_not_called()
+
+
+@pytest.mark.parametrize("name", ["wikihelp", "wiki_help", "WIKIHELP", "WIKI_HELP"])
+def test_help_alias_registration_and_permissions(plugin, name):
+    instance, Event, _ = plugin
+    handler = instance.wiki_command_help
+    assert name in {handler.command_name, *handler.command_aliases}
+    event = Event(f"/{name}")
+    assert asyncio.run(_collect(handler(event))) == []
+    assert event.sent == [instance._help_text()]
+    instance.sessions = {"other-session"}
+    denied = asyncio.run(_collect(handler(Event(f"/{name}"))))
+    assert len(denied) == 1 and "当前会话未启用" in denied[0]
+
+
+@pytest.mark.parametrize("name", ["op", "OP", "Op", "oP"])
+def test_op_alias_registration_accepts_uppercase_actions_and_checks_admin(plugin, name):
+    instance, Event, _ = plugin
+    handler = instance.wiki_command_op
+    assert name in {handler.command_name, *handler.command_aliases}
+    instance.cache.clear = AsyncMock(return_value=0)
+    for service in instance.services.values():
+        service.clear_parse_cache = AsyncMock(return_value=0)
+    denied = asyncio.run(_collect(handler(Event(f"/{name} CLEAR-CACHE"))))
+    assert len(denied) == 1 and "管理员" in denied[0]
+    instance.cache.clear.assert_not_awaited()
+    replies = asyncio.run(_collect(handler(Event(f"/{name} CLEAR-CACHE", admin=True))))
+    assert len(replies) == 1 and "已清理缓存" in replies[0]
+    instance.cache.clear.assert_awaited_once()
+    event = Event(f"/{name} SESSION OFF", admin=True)
+    assert asyncio.run(_collect(handler(event))) == []
+    assert instance.session_overrides[event.unified_msg_origin] is False
+    event = Event(f"/{name} SESSION ON", admin=True)
+    assert asyncio.run(_collect(handler(event))) == []
+    assert instance.session_overrides[event.unified_msg_origin] is True
+
+
+def test_uppercase_admin_action_with_extra_argument_does_not_clear_cache(plugin):
+    instance, Event, _ = plugin
+    instance.cache.clear = AsyncMock()
+    replies = asyncio.run(
+        _collect(instance.wiki_command_op(Event("/OP CLEAR-CACHE extra", admin=True)))
+    )
+    assert replies == ["用法：/op clear-cache"]
+    instance.cache.clear.assert_not_awaited()

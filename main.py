@@ -401,7 +401,7 @@ class GameWiki(Star):
                 return
             if arg not in {"on", "off", "reset"}:
                 await event.send(
-                    event.plain_result("用法：/游戏 session on|off|status|reset")
+                    event.plain_result("用法：/op session on|off|status|reset")
                 )
                 return
             if arg == "reset":
@@ -430,11 +430,7 @@ class GameWiki(Star):
         word = parts[1].strip() if len(parts) > 1 else ""
         admin_word = word.split(maxsplit=1)[0] if word else ""
         if admin_word in ADMIN_WORDS:
-            if admin_word != "session" and word != admin_word:
-                yield event.plain_result(f"用法：/{profile.command} {admin_word}")
-                return
-            async for reply in self._admin_action(event, admin_word):
-                yield reply
+            await event.send(event.plain_result("管理指令请使用：/op " + word))
             return
         if not self._allowed(event):
             yield event.plain_result(
@@ -442,16 +438,7 @@ class GameWiki(Star):
             )
             return
         if len(parts) < 2 or parts[1].strip() == "help":
-            await event.send(
-                event.plain_result(
-                    f"用法：/{profile.command} 名称或完整问题\n"
-                    f"例：/{profile.command} 条目名 获取方式\n"
-                    f"帮助：/{profile.command} help\n"
-                    f"候选：/{profile.command} 编号；追问：/{profile.command} 突破材料呢\n"
-                    f"管理员：/{profile.command} stats / /{profile.command} clear-cache / "
-                    f"/{profile.command} doctor / /{profile.command} session on|off|status|reset"
-                )
-            )
+            await event.send(event.plain_result("查看统一帮助：/wikihelp"))
             return
         service = self.services.get(profile.code)
         if service is None:
@@ -687,7 +674,7 @@ class GameWiki(Star):
     async def wiki_command_ys(self, event: AstrMessageEvent):
         """ys 名称或问题：查询原神 BWIKI，返回概览和来源。
 
-        管理员参数：stats / clear-cache；帮助：help。
+        管理入口：/op；统一帮助：/wikihelp。
         """
         async for reply in self._wiki_command(event, PROFILES["ys"]):
             yield reply
@@ -726,6 +713,58 @@ class GameWiki(Star):
     async def wiki_command_ww(self, event: AstrMessageEvent):
         """ww 名称或问题：查询鸣潮百科（库街区官方 + BWIKI 兜底）。"""
         async for reply in self._wiki_command(event, PROFILES["ww"]):
+            yield reply
+
+    def _help_text(self):
+        games = "\n".join(
+            f"/{profile.command} {profile.name}"
+            for code, profile in PROFILES.items()
+            if code in self.services
+        )
+        return (
+            f"游戏指令：\n{games}\n\n"
+            "查询：/游戏指令 名称或完整问题\n"
+            "候选：回复编号，或 /游戏指令 编号\n"
+            "追问：直接发送问题，或 /游戏指令 问题\n"
+            "候选与追问需先查询，且需开启会话上下文。\n\n"
+            "管理员指令：\n"
+            "/op stats：查看统计\n"
+            "/op clear-cache：清理缓存\n"
+            "/op doctor：运行诊断\n"
+            "/op session on|off：启用或关闭当前会话\n"
+            "/op session status|reset：查看或重置会话设置"
+        )
+
+    @filter.command("wikihelp", alias={"wiki_help", "WIKIHELP", "WIKI_HELP"})
+    async def wiki_command_help(self, event: AstrMessageEvent):
+        """wikihelp：查看所有已启用游戏的统一帮助。"""
+        if not self._allowed(event):
+            yield event.plain_result(
+                "当前会话未启用百科查询，请在插件配置中添加本会话。"
+            )
+            return
+        parts = event.message_str.strip().split(maxsplit=1)
+        text = self._help_text() if len(parts) < 2 else "用法：/wikihelp"
+        await event.send(event.plain_result(text))
+
+    @filter.command("op", alias={"OP", "Op", "oP"})
+    async def wiki_command_op(self, event: AstrMessageEvent):
+        """op stats|clear-cache|doctor|session：管理员操作入口。"""
+        if not event.is_admin():
+            yield event.plain_result("该操作仅限 AstrBot 管理员使用。")
+            return
+        parts = event.message_str.strip().split(maxsplit=1)
+        word = parts[1].strip().lower() if len(parts) > 1 else ""
+        action = word.split(maxsplit=1)[0] if word else ""
+        if action not in ADMIN_WORDS:
+            yield event.plain_result(
+                "用法：/op stats | clear-cache | doctor | session on|off|status|reset"
+            )
+            return
+        if action != "session" and word != action:
+            yield event.plain_result(f"用法：/op {action}")
+            return
+        async for reply in self._admin_action(event, action):
             yield reply
 
     async def _tool_search(self, event, query, question, game):

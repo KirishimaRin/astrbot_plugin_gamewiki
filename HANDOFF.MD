@@ -5,7 +5,7 @@
 ## 项目身份与兼容
 
 - 插件标识、仓库名、安装目录与 ZIP 根目录统一为 `astrbot_plugin_gamewiki`，入口类为 `GameWiki`。
-- 只注册 `ys`、`sr`、`zzz`、`ark`、`zmd`；`ark` 的游戏代码为 `arknights`。管理参数为 `help`、`stats`、`clear-cache`、`session`、`doctor`。
+- 注册七个游戏指令 `ys`、`sr`、`zzz`、`ark`、`zmd`、`sts2`、`ww` 及统一帮助入口 `wikihelp`、管理入口 `op`；`ark` 的游戏代码为 `arknights`。`/op` 管理参数为 `stats`、`clear-cache`、`session`、`doctor`，帮助使用 `/wikihelp`。
 - `genshinimpactsearch` 仅用于识别旧持久化目录；旧原神 AI 工具 `genshin_wiki_search/read` 为兼容接口。不要将这些有效兼容代码当作遗留拼写删除。
 - 新配置默认全部五游戏启用；已有有效配置保留。会话白名单与管理员身份来自 AstrBot，管理员判断使用 `event.is_admin()`。
 - README 描述当前行为，CHANGELOG 记录已发布变更，ROADMAP 只列当前状态与待办。
@@ -366,3 +366,19 @@
 
 - 文本生成测试的 `AsyncMock` 应显式返回字符串；默认返回的 `AsyncMock` 会在 `reply.strip()` 路径产生协程未 await 的 RuntimeWarning。
 - `wiki_read` 的 source 参数说明须包含鸣潮与 `kurobbs`，保持 Args 格式以供工具 schema 解析；框架契约检查说明同步为七个英文命令。
+
+## v0.5.1 版本（统一帮助 /wikihelp 与独立管理入口 /op）
+
+- VERSION、metadata、README 与 CHANGELOG 同步为 v0.5.1。
+- 统一帮助入口为 `/wikihelp`，根据当前配置已启用的游戏列表动态生成指令清单；集中呈现查询语法、多轮候选/追问规范及管理员指令。旧游戏 help 指令及空游戏指令仅提示前往统一帮助入口，不触发检索或大模型消耗。
+- 独立管理入口为 `/op`（`stats`、`clear-cache`、`doctor`、`session`），优先校验 AstrBot 管理员身份；完全解耦查询限流与普通会话白名单，确保会话被禁用时仍可正常恢复设置与诊断。各游戏指令中的旧管理参数仅友好提示指向 `/op`。
+- 框架契约测试同步覆盖七个游戏命令、wikihelp 与 op 独立命令（共 9 个命令），保持原有注册顺序与过滤器契约。
+- `wiki_read` 的 source 参数说明更新为包含鸣潮与 `kurobbs`，保持 docstring Args 格式以供 LLM Tool Schema 正确解析。
+- 单测中文本生成的 `AsyncMock` 均显式指定具体返回值，消除 `reply.strip()` 路径触发的 RuntimeWarning 协程未 await 告警。
+
+
+## 命令别名与大小写容错（2026-10-31）
+
+- AstrBot 4.5.7/4.29.3 的 CommandFilter 区分大小写，进入处理函数前即匹配命令；仅在函数内部小写化命令名称无法兼容大写入口。使用原生 alias 集合显式注册常见形式，避免修改事件原文或全局过滤行为。
+- `/wikihelp` 别名为 `/wiki_help`、`/WIKIHELP`、`/WIKI_HELP`；`/op` 别名为 `/OP`、`/Op`、`/oP`。管理参数统一小写后校验，session 子参数沿用原有大小写归一；帮助与管理员权限校验保持一致。
+- 注册别名必须同步更新 registered 断言，并用真实 wheel 的 CommandFilter 验证别名匹配、拒绝无关前缀与管理员权限；只直接调用处理函数的单测无法验证入口匹配。
