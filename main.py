@@ -722,6 +722,12 @@ class GameWiki(Star):
         async for reply in self._wiki_command(event, PROFILES["sts2"]):
             yield reply
 
+    @filter.command("ww")
+    async def wiki_command_ww(self, event: AstrMessageEvent):
+        """ww 名称或问题：查询鸣潮百科（库街区官方 + BWIKI 兜底）。"""
+        async for reply in self._wiki_command(event, PROFILES["ww"]):
+            yield reply
+
     async def _tool_search(self, event, query, question, game):
         if not self._allowed(event):
             return {

@@ -276,7 +276,7 @@ async def main():
             )
             assert event.sent[0].startswith("正在查询")
         assert registered == [
-            (name, None) for name in ("ys", "sr", "zzz", "ark", "zmd", "sts2")
+            (name, None) for name in ("ys", "sr", "zzz", "ark", "zmd", "sts2", "ww")
         ]
         for old in (
             "原神百科",
