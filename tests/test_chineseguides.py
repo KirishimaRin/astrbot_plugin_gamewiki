@@ -422,3 +422,40 @@ def test_tips_ranking_matches_coop_deck_and_enchant_questions(tmp_path):
     assert coop["key"] == "cn:guide:sts2front:tips:solo-vs-co-op"
     assert deck["key"] == "cn:guide:sts2front:tips:best-combos"
     assert enchant["key"] == "cn:guide:sts2front:tips:enchantments"
+
+
+def test_oversize_guide_stops_reading_before_parsing_or_caching(tmp_path, monkeypatch):
+    import wiki.chineseguides as adapter
+    from unittest.mock import Mock
+
+    monkeypatch.setattr(adapter, "MAX_HTML_BYTES", 8)
+    state = {"chunks": 0, "closed": False}
+
+    class Stream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            for _ in range(10):
+                state["chunks"] += 1
+                yield b"xxxx"
+
+        async def aclose(self):
+            state["closed"] = True
+
+    async def run():
+        cache = Cache(tmp_path)
+        client = ChineseGuideService(
+            cache,
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(200, stream=Stream())
+            ),
+        )
+        parser = Mock()
+        try:
+            with pytest.raises(ValueError, match="download limit"):
+                await client._get("https://sts2.info/zh/mechanics", 60, parser)
+            assert state == {"chunks": 3, "closed": True}
+            parser.assert_not_called()
+            assert (await cache.health())["entries"] == 0
+        finally:
+            await client.close()
+
+    asyncio.run(run())

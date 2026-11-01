@@ -176,6 +176,20 @@ def _banner_question(text):
     return any(word in text for word in BANNER_WORDS)
 
 
+def _with_level_hint(question, raw_question):
+    """「毕业面板」的“毕业”被黑话删掉后失去等级线索，补回 90 级。
+
+    question 走 300 字校验：贴近上限时放弃补缀，避免越界报错。
+    """
+    if (
+        any(word in raw_question for word in ("毕业", "满级"))
+        and any(word in raw_question for word in ("面板", "属性", "等级", "数值"))
+        and len(question) + 4 <= 300
+    ):
+        return f"{question} 90级"
+    return question
+
+
 def _activity_question(text):
     # 「活动道具有哪些」问的是道具分类，不是活动列表。
     if "道具" in text:
@@ -305,26 +319,30 @@ class KuroBbsClient(WikiClient):
         raise WikiError("upstream", f"{self.source_name} 服务暂时异常。")
 
     async def _post_json(self, url, data):
-        async with self._slots:
-            self._counters["upstream_requests"] += 1
-            response = await self.http.post(url, data=data)
-        if response.status_code == 429:
-            delay = self._retry_after(response.headers.get("Retry-After", "30"))
-            WikiClient._blocked[self._host] = time.monotonic() + delay
-            raise WikiError(
-                "rate_limited",
-                f"{self.source_name} 暂时限流，请约 {int(delay)} 秒后重试。",
-            )
-        if response.status_code == 403:
-            raise WikiError(
-                "forbidden", f"{self.source_name} 拒绝了本次访问，请稍后重试。"
-            )
-        response.raise_for_status()
-        body = response.content
-        if len(body) > MAX_BYTES:
-            raise WikiError("too_large", "词条内容过大，请换用更具体的条目。")
+        # 调用链上游 _fetch_and_cache 已持有 _slots：在这里再取一次会让
+        # concurrency=1 自我死锁，并把配置并发减半。
+        self._counters["upstream_requests"] += 1
+        async with self.http.stream("POST", url, data=data) as response:
+            if response.status_code == 429:
+                delay = self._retry_after(response.headers.get("Retry-After", "30"))
+                WikiClient._blocked[self._host] = time.monotonic() + delay
+                raise WikiError(
+                    "rate_limited",
+                    f"{self.source_name} 暂时限流，请约 {int(delay)} 秒后重试。",
+                )
+            if response.status_code == 403:
+                raise WikiError(
+                    "forbidden", f"{self.source_name} 拒绝了本次访问，请稍后重试。"
+                )
+            response.raise_for_status()
+            chunks, size = [], 0
+            async for chunk in response.aiter_bytes():
+                size += len(chunk)
+                if size > MAX_BYTES:
+                    raise WikiError("too_large", "词条内容过大，请换用更具体的条目。")
+                chunks.append(chunk)
         try:
-            payload = json.loads(body)
+            payload = await asyncio.to_thread(json.loads, b"".join(chunks))
         except (ValueError, UnicodeError):
             raise WikiError(
                 "invalid_response", f"{self.source_name} 返回了非 JSON 内容。"
@@ -581,10 +599,7 @@ class KuroBbsService:
         query = normalize_slang(query, self.profile)
         question = normalize_slang(question, self.profile)
         # 「毕业面板」的“毕业”被全局黑话删掉后失去等级线索，补回 90 级。
-        if any(word in raw_question for word in ("毕业", "满级")) and any(
-            word in raw_question for word in ("面板", "属性", "等级", "数值")
-        ):
-            question = f"{question} 90级"
+        question = _with_level_hint(question, raw_question)
         return await self._guard(self._search(query, question))
 
     async def read(self, page_id, question="", section="", *, source=""):
@@ -669,7 +684,10 @@ class KuroBbsService:
                     retry = await self._search(head, tail, allow_split=False)
                 except Exception:  # noqa: BLE001 - 拆分失败仍回退全句候选
                     retry = None
-                if retry is not None and retry.get("status") == "ok":
+                if retry is not None and retry.get("status") in {
+                    "ok",
+                    "section_not_found",
+                }:
                     retry = {**retry, "query": query}
                     return retry
         if not entries:

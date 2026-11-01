@@ -492,3 +492,18 @@ class TestGuideSubpage(unittest.IsolatedAsyncioTestCase):
             "胡桃", "胡桃配队"
         )
         assert result["title"] == "胡桃"
+
+    async def test_parse_without_pageid_reports_invalid_response(self):
+        class BareClient:
+            source = "bwiki"
+
+            async def request(self, params, ttl):
+                return {
+                    "_fetched_at": "2026-10-30",
+                    "parse": {"title": "纳西妲", "text": "<p>正文</p>"},
+                }
+
+        service = QueryService(BareClient(), profile=PROFILES["ys"])
+        with pytest.raises(WikiError) as exc:
+            await service.read(1, "突破")
+        assert exc.value.code == "invalid_response"

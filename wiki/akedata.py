@@ -133,12 +133,18 @@ class AkeService:
         self.aliases = aliases or {}
         self.search_ttl, self.page_ttl = search_ttl, page_ttl
         self.max_chars, self.timeout = max_chars, timeout
+        # 全量索引只按数据版本构建一次；三张表每次反序列化后重建太贵。
+        self._index_version = ""
+        self._index_data = None
 
     def stats(self):
         return self.client.stats()
 
     async def clear_parse_cache(self):
-        return 0  # No table snapshots retained outside the shared TTL cache.
+        # 共享 TTL 缓存之外，进程内还留着按版本构建的全量索引，一并丢弃。
+        self._index_data = None
+        self._index_version = ""
+        return 0
 
     async def _version(self):
         m = await self.client.request({"path": "/manifest.json"}, self.search_ttl)
@@ -165,13 +171,20 @@ class AkeService:
         )
 
     async def _index(self, version):
+        if self._index_data is not None and self._index_version == version["id"]:
+            return self._index_data
         chars, items, texts = await asyncio.gather(
             *(
                 self._table(version, n)
                 for n in ("CharacterTable", "ItemTable", "I18nTextTable_CN")
             )
         )
+        # 构建是纯 CPU 的全表扫描，放线程里做，避免阻塞事件循环。
+        data = await asyncio.to_thread(self._build_index, chars, items, texts)
+        self._index_version, self._index_data = version["id"], data
+        return data
 
+    def _build_index(self, chars, items, texts):
         def text(value):
             if isinstance(value, dict):
                 value = texts.get(str(value.get("id")), value.get("text", ""))

@@ -1322,3 +1322,59 @@ def test_uppercase_admin_action_with_extra_argument_does_not_clear_cache(plugin)
     )
     assert replies == ["用法：/op clear-cache"]
     instance.cache.clear.assert_not_awaited()
+
+
+def test_disabled_images_keep_material_details_in_the_overview_prompt(plugin):
+    instance, Event, _ = plugin
+    instance.image_reply = False
+    page = _wiki_page()
+    page["evidence"][0]["text"] = "劫波莲 × 168；摩拉 × 420000"
+    instance.services["ys"].search = AsyncMock(return_value=page)
+    generate = AsyncMock(
+        return_value=SimpleNamespace(completion_text="需要劫波莲168株。")
+    )
+    instance.context = SimpleNamespace(
+        get_current_chat_provider_id=AsyncMock(return_value="p"),
+        llm_generate=generate,
+    )
+    event = Event("ys 纳西妲 突破材料")
+    asyncio.run(_collect(instance.wiki_command_ys(event)))
+    prompt = generate.await_args.kwargs["prompt"]
+    assert "保留数量、单位、等级和条件" in prompt
+    assert "细节已由随回复的证据卡片展示" not in prompt
+    assert len(event.sent) == 1 and "168" in event.sent[0]
+
+
+@pytest.mark.parametrize("failure", ["no_font", "render", "send"])
+def test_failed_cards_deliver_material_details_as_text(plugin, failure):
+    instance, Event, module = plugin
+    page = _wiki_page()
+    page["evidence"][0]["text"] = "劫波莲 × 168；摩拉 × 420000"
+    instance.services["ys"].search = AsyncMock(return_value=page)
+    instance.context = SimpleNamespace(
+        get_current_chat_provider_id=AsyncMock(return_value="p"),
+        llm_generate=AsyncMock(
+            return_value=SimpleNamespace(completion_text="需要准备当地特产。")
+        ),
+    )
+    event = Event("ys 纳西妲 突破材料")
+    event.image_result = lambda path: ("image", path)
+    send_text = event.send
+
+    async def send(result):
+        if isinstance(result, tuple):
+            raise RuntimeError("upload failed")
+        await send_text(result)
+
+    if failure == "send":
+        event.send = send
+    renderer = (
+        {"side_effect": RuntimeError("render failed")}
+        if failure == "render"
+        else {"return_value": None if failure == "no_font" else b"png"}
+    )
+    with patch.object(module, "render_card", **renderer):
+        asyncio.run(_collect(instance.wiki_command_ys(event)))
+    assert len(event.sent) == 2
+    assert "原文摘录" in event.sent[1]
+    assert "劫波莲" in event.sent[1] and "168" in event.sent[1]

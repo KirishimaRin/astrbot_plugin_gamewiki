@@ -341,10 +341,13 @@ class QueryService:
         html = value.get("text")
         if not isinstance(html, str):
             raise WikiError("invalid_response", "词条正文格式异常。")
+        resolved_id, revid = value.get("pageid"), value.get("revid")
+        if not isinstance(resolved_id, int) or not isinstance(revid, int):
+            raise WikiError("invalid_response", "词条正文格式异常。")
         title = value.get("title", "")
         # Reuse parsed pages, not just HTTP bodies; HTML parsing dominates warm hits.
         fetched_at = data.get("_fetched_at") or ""
-        key = (value.get("pageid", 0), value.get("revid", 0), fetched_at)
+        key = (resolved_id, revid, fetched_at)
         async with self._parse_lock:
             page = self._parsed.get(key)
             if page is None:
@@ -363,8 +366,8 @@ class QueryService:
                 )
                 page = Page(
                     title,
-                    value["pageid"],
-                    value["revid"],
+                    resolved_id,
+                    revid,
                     data["_fetched_at"],
                     sections,
                     related,

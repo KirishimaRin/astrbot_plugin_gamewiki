@@ -30,6 +30,7 @@ STS2FRONT_TIPS = STS2FRONT + "/zh-cn/tips/"
 # Only quote the part needed for retrieval; the full article stays on the
 # source site and is linked from the result.
 EXCERPT_CHARS = 2500
+MAX_HTML_BYTES = 4 << 20
 CHARACTER_IDS = {
     "铁甲战士": "ironclad",
     "静默猎手": "silent",
@@ -200,8 +201,15 @@ class ChineseGuideService:
         for attempt in range(3):
             await self._wait()
             try:
-                response = await self.http.get(url)
-                response.raise_for_status()
+                async with self.http.stream("GET", url) as response:
+                    response.raise_for_status()
+                    chunks, size = [], 0
+                    async for chunk in response.aiter_bytes():
+                        size += len(chunk)
+                        if size > MAX_HTML_BYTES:
+                            raise ValueError("Chinese guide exceeds download limit")
+                        chunks.append(chunk)
+                    encoding = response.encoding or "utf-8"
                 break
             except (httpx.TimeoutException, httpx.NetworkError):
                 if attempt == 2:
@@ -220,7 +228,11 @@ class ChineseGuideService:
                 if exc.response.status_code < 500 or attempt == 1:
                     raise
                 await asyncio.sleep(0.5)
-        data = parser(response.text)
+
+        def parse():
+            return parser(b"".join(chunks).decode(encoding, errors="replace"))
+
+        data = await asyncio.to_thread(parse)
         await self.cache.put(key, {"data": data}, ttl)
         return data
 

@@ -6,6 +6,7 @@ live in cleaning/selection; game terms and source addresses belong here.
 
 import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 YS_SPECIFICS = (
     (("突破材料", "突破"), "突破"),
@@ -866,8 +867,12 @@ def normalize_slang(text: str, profile: GameProfile) -> str:
     return text
 
 
+@lru_cache(maxsize=1)
 def aspect_words() -> tuple:
-    """Every word that marks a query as an aspect question, not a bare name."""
+    """Every word that marks a query as an aspect question, not a bare name.
+
+    词表只由模块级常量决定，而黑话归一的位置判定会按匹配逐次调用，
+    缓存后避免每次重建整个集合。"""
     words = set(GENERIC_ASPECTS)
     for profile in PROFILES.values():
         for row in (*profile.intents, *profile.specifics):

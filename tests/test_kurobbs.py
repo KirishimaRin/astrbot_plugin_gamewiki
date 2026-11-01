@@ -377,6 +377,49 @@ def test_client_maps_error_codes(tmp_path):
     asyncio.run(run())
 
 
+def test_concurrency_one_does_not_deadlock(tmp_path):
+    """_post_json 不重复获取 _slots：concurrency=1 必须能完成请求。"""
+
+    state = {"active": 0, "peak": 0}
+
+    async def handler(request):
+        state["active"] += 1
+        state["peak"] = max(state["peak"], state["active"])
+        await asyncio.sleep(0.05)
+        state["active"] -= 1
+        return httpx.Response(200, json={"code": 200, "msg": "ok", "data": {}})
+
+    async def run():
+        client = KuroBbsClient(
+            Cache(tmp_path),
+            timeout=5,
+            concurrency=1,
+            transport=httpx.MockTransport(handler),
+        )
+        try:
+            results = await asyncio.wait_for(
+                asyncio.gather(
+                    client.get(
+                        "/wiki/core/catalogue/item/search",
+                        {"data": {"keyword": "a"}},
+                        60,
+                    ),
+                    client.get(
+                        "/wiki/core/catalogue/item/search",
+                        {"data": {"keyword": "b"}},
+                        60,
+                    ),
+                ),
+                10,
+            )
+            assert all(result == {} for result in results)
+        finally:
+            await client.close()
+        assert state["peak"] == 1, "concurrency=1 应串行上游请求"
+
+    asyncio.run(run())
+
+
 def test_router_falls_back_to_bwiki(tmp_path):
     def broken(request):
         return httpx.Response(200, json={"code": 500, "msg": "系统异常", "data": None})
@@ -850,3 +893,109 @@ def test_system_concept_aliases_resolve_on_the_primary(tmp_path):
     assert service.aliases["体力"] == "结晶溶剂"
     assert service.aliases["数据坞"] == "数据坞等级"
     asyncio.run(client.close())
+
+
+def test_oversize_post_stops_reading_and_closes_the_stream(tmp_path, monkeypatch):
+    import wiki.kurobbs as adapter
+
+    monkeypatch.setattr(adapter, "MAX_BYTES", 8)
+    state = {"chunks": 0, "closed": False}
+
+    class Stream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            for _ in range(10):
+                state["chunks"] += 1
+                yield b"xxxx"
+
+        async def aclose(self):
+            state["closed"] = True
+
+    async def run():
+        client = make_client(
+            tmp_path, lambda request: httpx.Response(200, stream=Stream())
+        )
+        try:
+            with pytest.raises(WikiError) as exc:
+                await client.get("/wiki/test", {}, 60)
+            assert exc.value.code == "too_large"
+            assert state == {"chunks": 3, "closed": True}
+        finally:
+            await client.close()
+
+    asyncio.run(run())
+
+
+def test_router_preserves_complete_names_before_splitting():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    async def run():
+        primary = SimpleNamespace(
+            profile=PROFILES["ww"],
+            aliases={},
+            search=AsyncMock(return_value={"status": "needs_choice"}),
+        )
+        backup = SimpleNamespace(search=AsyncMock())
+        result = await WuwaSources(primary, backup).search("索拉等级")
+        assert result["status"] == "needs_choice"
+        primary.search.assert_awaited_once_with("索拉等级", "")
+        backup.search.assert_not_awaited()
+
+        primary.search.return_value = {"status": "not_found"}
+        backup.search.return_value = {"status": "ok", "title": "索拉等级"}
+        result = await WuwaSources(primary, backup).search("索拉等级")
+        assert result["title"] == "索拉等级"
+        backup.search.assert_awaited_once_with("索拉等级", "")
+
+    asyncio.run(run())
+
+
+def test_router_fallback_splits_only_after_the_complete_query_fails():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, call
+
+    async def run():
+        primary = SimpleNamespace(
+            profile=PROFILES["ww"],
+            aliases={},
+            search=AsyncMock(return_value={"status": "not_found"}),
+        )
+        backup = SimpleNamespace(
+            search=AsyncMock(
+                side_effect=[{"status": "not_found"}, {"status": "ok", "title": "今汐"}]
+            )
+        )
+        result = await WuwaSources(primary, backup).search("今汐共鸣链效果")
+        assert result["status"] == "ok" and result["source_key"] == "bwiki"
+        assert backup.search.await_args_list == [
+            call("今汐共鸣链效果", ""),
+            call("今汐", "共鸣链效果"),
+        ]
+
+    asyncio.run(run())
+
+
+def test_split_query_without_primary_section_reaches_bwiki(tmp_path):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    async def run():
+        client = make_client(tmp_path, kuro_handler(SEARCH_RECORDS))
+        primary = KuroBbsService(client)
+        backup = SimpleNamespace(
+            search=AsyncMock(
+                side_effect=[
+                    {"status": "not_found"},
+                    {"status": "ok", "title": "今汐", "question": "共鸣链效果"},
+                ]
+            )
+        )
+        try:
+            result = await WuwaSources(primary, backup).search("今汐共鸣链效果")
+            assert result["status"] == "ok" and result["source_key"] == "bwiki"
+            assert result["question"] == "共鸣链效果"
+            assert backup.search.await_count == 2
+        finally:
+            await client.close()
+
+    asyncio.run(run())

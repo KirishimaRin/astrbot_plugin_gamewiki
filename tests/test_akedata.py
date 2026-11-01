@@ -294,6 +294,30 @@ def test_version_refresh_uses_new_snapshot_instead_of_old_table_cache(tmp_path):
     asyncio.run(run())
 
 
+def test_index_is_built_once_per_version_and_cleared(tmp_path):
+    async def run():
+        client, service, _, _ = setup(tmp_path)
+        builds = []
+        original = service._build_index
+
+        def counting(chars, items, texts):
+            builds.append(1)
+            return original(chars, items, texts)
+
+        service._build_index = counting
+        try:
+            await service.search("祀")
+            await service.search("祀")
+            assert len(builds) == 1  # 同版本索引在进程内复用。
+            await service.clear_parse_cache()
+            await service.search("祀")
+            assert len(builds) == 2  # 清缓存后允许重建。
+        finally:
+            await client.close()
+
+    asyncio.run(run())
+
+
 def test_requested_level_talents_potentials_and_unavailable_sections(tmp_path):
     async def run():
         client, service, _, data = setup(tmp_path)

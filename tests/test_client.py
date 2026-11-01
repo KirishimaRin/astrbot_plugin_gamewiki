@@ -282,3 +282,37 @@ class TestClient(unittest.IsolatedAsyncioTestCase):
             await client.request({"a": 1}, 0)
         assert exc.value.code == "upstream"
         assert len(calls) == 3, "every retry attempt must reach the wire"
+
+
+@pytest.mark.parametrize(
+    "second_base", ["https://second.example", "https://first.example/alternate"]
+)
+def test_custom_api_origins_and_path_prefixes_have_separate_caches(
+    tmp_path, second_base
+):
+    from wiki.spirecodex import SpireCodexClient
+
+    async def run():
+        calls = []
+
+        def respond(request):
+            calls.append(str(request.url))
+            return httpx.Response(200, json=[{"origin": str(request.url)}])
+
+        cache = Cache(tmp_path)
+        clients = [
+            SpireCodexClient(cache, base=base, transport=httpx.MockTransport(respond))
+            for base in ("https://first.example", second_base)
+        ]
+        try:
+            first = await clients[0].get("/api/cards", {}, 600)
+            second = await clients[1].get("/api/cards", {}, 600)
+            assert first != second
+            assert second[0]["origin"] == second_base + "/api/cards"
+            assert await clients[1].get("/api/cards", {}, 600) == second
+            assert len(calls) == 2
+        finally:
+            for client in clients:
+                await client.close()
+
+    asyncio.run(run())

@@ -428,14 +428,14 @@ class GameWiki(Star):
         message = (event.message_str if command_text is None else command_text).strip()
         parts = message.split(maxsplit=1)
         word = parts[1].strip() if len(parts) > 1 else ""
-        admin_word = word.split(maxsplit=1)[0] if word else ""
-        if admin_word in ADMIN_WORDS:
-            await event.send(event.plain_result("管理指令请使用：/op " + word))
-            return
         if not self._allowed(event):
             yield event.plain_result(
                 "当前会话未启用百科查询，请在插件配置中添加本会话。"
             )
+            return
+        admin_word = word.split(maxsplit=1)[0] if word else ""
+        if admin_word in ADMIN_WORDS:
+            await event.send(event.plain_result("管理指令请使用：/op " + word))
             return
         if len(parts) < 2 or parts[1].strip() == "help":
             await event.send(event.plain_result("查看统一帮助：/wikihelp"))
@@ -569,6 +569,7 @@ class GameWiki(Star):
                 question=question,
                 source=source,
                 on_result=on_result,
+                card_enabled=self.image_reply,
             )
             self.recent_outcomes[profile.code] = metrics.get(
                 "fallback_reason", metrics.get("outcome", "unknown")
@@ -598,10 +599,11 @@ class GameWiki(Star):
         # The excerpt fallback already quotes the evidence verbatim; a card of
         # the same text would be a pure duplicate.
         if self.image_reply and card and not metrics.get("fallback"):
-            await self._send_card(event, card, profile.accent)
+            if not await self._send_card(event, card, profile.accent):
+                await event.send(event.plain_result(metrics["card_text"]))
 
     async def _send_card(self, event: AstrMessageEvent, card: dict, accent: tuple = ()):
-        # Rendered locally from validated evidence; no font means no card.
+        # Report delivery so the caller can send text when the card is unavailable.
         try:
             async with self._image_slots:
                 png = await asyncio.to_thread(
@@ -613,13 +615,15 @@ class GameWiki(Star):
                     font_dir=self.data_dir / "fonts",
                 )
                 if not png:
-                    return
+                    return False
                 with tempfile.TemporaryDirectory(prefix="gamewiki-card-") as directory:
                     path = Path(directory) / "card.png"
                     path.write_bytes(png)
                     await event.send(event.image_result(str(path)))
+                return True
         except Exception:
             logger.debug("证据卡片发送失败，忽略", exc_info=True)
+            return False
 
     async def _send_entry_image(
         self, event: AstrMessageEvent, image_url: str, *, convert_webp=False

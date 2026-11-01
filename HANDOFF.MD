@@ -14,6 +14,7 @@
 
 - 原神、星铁、绝区零使用 BWIKI；明日方舟 PRTS 优先、BWIKI 备用；终末地 AKEData 优先、BWIKI 备用。
 - `WikiClient` 是 MediaWiki 客户端；其默认来源与 `games.default_source()` 仅用于 MediaWiki 请求，终末地主源由入口的 `AkeClient/AkeService + EndfieldSources` 编排。
+- `WikiClient` 的并发信号量 `_slots` 由共享的 `_fetch_and_cache` 统一持有：子类自定义请求方法（如库街区 `_post_json`）不得再次获取，否则 `upstream_concurrency=1` 自我死锁、其余配置并发减半（v0.5.1 曾踩坑，`test_concurrency_one_does_not_deadlock` 回归兜底）。
 - 主源搜索最多使用总查询预算60%且不超过8秒。无结果、无所问内容或异常时回退，提示须使用实际游戏和来源名称。
 - 补读必须沿用搜索返回的 `source_key`，不能将某站 page_id 发到另一站。补读失败时不跨站，重新搜索才可切换来源。
 - 只有精确名称可自动读取；模糊或纠错结果必须先让用户确认。同名头像不能压过 AKEData 干员记录。
@@ -59,6 +60,7 @@
 - CI 的 check 矩阵和 framework 全部通过后，release 才能创建发行包。
 - 从 v0.2.0 初始提交开始，后续正常追加提交与 `vX.Y.Z` 版本标签；新正式 Release 显式标为 Latest，不创建滚动 latest/other 标签。
 - 研究响应、虚拟环境、构建产物、缓存和本机环境配置保持忽略，不进入 Git 或安装包。公共仓库不保留服务器连接信息、认证说明或会话日志。
+- 本机没有全局 `python`/`pytest`，验证一律走项目根目录 `.venv/bin/python`（含 `python -m pytest tests/`）。
 
 ## 卡片可读性
 
@@ -382,3 +384,14 @@
 - AstrBot 4.5.7/4.29.3 的 CommandFilter 区分大小写，进入处理函数前即匹配命令；仅在函数内部小写化命令名称无法兼容大写入口。使用原生 alias 集合显式注册常见形式，避免修改事件原文或全局过滤行为。
 - `/wikihelp` 别名为 `/wiki_help`、`/WIKIHELP`、`/WIKI_HELP`；`/op` 别名为 `/OP`、`/Op`、`/oP`。管理参数统一小写后校验，session 子参数沿用原有大小写归一；帮助与管理员权限校验保持一致。
 - 注册别名必须同步更新 registered 断言，并用真实 wheel 的 CommandFilter 验证别名匹配、拒绝无关前缀与管理员权限；只直接调用处理函数的单测无法验证入口匹配。
+
+
+## v0.5.2 版本（健壮性加固与流式安全传输）
+
+- VERSION、metadata、README 与 CHANGELOG 同步为 v0.5.2。
+- 卡片交付兜底与图文开关解耦：`CommandAssistant.answer` 增加 `card_enabled` 参数感知 `image_reply` 开关状态。当图片回复关闭时，强制生成包含具体属性与材料的 150~250 字完整结构化概览，避免进入简明概览导致数值与材料信息随卡片一同丢失；增强 `_send_card` 发送状态反馈，在无可用字体、排版渲染异常或图片上传失败时，主流程自动平滑补发格式化的原文摘录（`card_text`），确保关键数据始终可达。
+- 鸣潮双源路由检索与回退逻辑优化：`WuwaSources` 取消提前切分输入的逻辑，库街区主源与 BWIKI 备用源统一优先按用户完整输入整词检索，保护「索拉等级」等专有词汇；仅在 BWIKI 兜底无结果或返回模糊列表时才切分重试。修复库街区主源切分后返回 `section_not_found` 未交回路由层的问题，确保分节缺失时能平滑由 BWIKI 进行备用兜底。
+- 流式安全传输与密集计算异步化：库街区 API POST 请求全面采用流式读取，累积解压达到 8 MiB 上限即时中止；杀戮尖塔2 中文攻略页面增加 4 MiB 流式下载限制，杜绝大响应内存挤占；将 JSON 反序列化及 HTML 结构密集解析统一放入工作线程（`asyncio.to_thread`），消除事件循环阻塞；AKEData 索引按版本缓存并异步构建。
+- HTTP 缓存键隔离与自建源独立缓存（Cache Key v2）：HTTP 缓存键格式明确绑定数据源、游戏代号及去尾部斜杠的规范化 API 根地址，彻底隔离自建或第三方镜像源（如 `spire_codex_base`、`kuro_bbs_base`），切换源地址不再复用旧数据，旧缓存自然过期淘汰。
+- 并发信号量防死锁保护与方面词缓存：移除库街区客户端在 `_post_json` 中对信号量的重复获取，统一由共享 `_fetch_and_cache` 调度，彻底解决 `upstream_concurrency=1` 时的死锁问题并恢复既定并发度；`aspect_words()` 增加单槽 LRU 缓存避免高频重复构建。
+- 验证：全量 pytest 531 passed、2 subtests passed；Ruff check、format --check 与打包校验均通过。

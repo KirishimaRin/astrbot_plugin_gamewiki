@@ -258,6 +258,7 @@ class CommandAssistant:
         question="",
         source="",
         on_result=None,
+        card_enabled=True,
     ) -> tuple[str, dict]:
         if not isinstance(text, str) or not 0 < len(text.strip()) <= 300:
             raise WikiError("bad_input", "请输入 1–300 字的名称或问题。")
@@ -435,7 +436,8 @@ class CommandAssistant:
             if wants_image(question, result.get("title", "")):
                 metrics["image_url"] = result.get("image_url", "")
             elif (
-                result.get("evidence")
+                card_enabled
+                and result.get("evidence")
                 and result.get("selection", {}).get("mode") != "fallback"
                 and any(item["section"] != "概览" for item in result["evidence"])
             ):
@@ -449,6 +451,7 @@ class CommandAssistant:
                     ],
                 }
                 has_card = True
+                metrics["card_text"] = excerpt(result)
         if result["status"] in {"error", "not_found", "needs_choice"}:
             reply = format_command(result)
         elif not result.get("evidence"):

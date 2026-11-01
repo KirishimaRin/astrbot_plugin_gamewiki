@@ -40,7 +40,7 @@ class SourceRouter:
             pass
         self.fallbacks += 1
         try:
-            result = await self.fallback.search(query, question)
+            result = await self._fallback_search(query, question)
         except WikiError:
             # 主源已经明确“没有这个词条/分节”时，兜底源故障不改变这个
             # 结论：返回主源的 not_found 比抛上游错误更准确（BWIKI 的 WAF
@@ -51,6 +51,9 @@ class SourceRouter:
         result = self._annotate(result, "bwiki")
         result["fallback_from"] = self.primary_source
         return result
+
+    async def _fallback_search(self, query, question):
+        return await self.fallback.search(query, question)
 
     async def search(self, query, question=""):
         return await asyncio.wait_for(self._search(query, question), self.timeout)
@@ -102,19 +105,30 @@ class WuwaSources(SourceRouter):
     game_name = "鸣潮"
 
     async def search(self, query, question=""):
-        # 主源会在服务层把「今汐满链效果」拆成实体+方面；兜底源收到的是
-        # 原始整串，会搜不到。这里先拆好，两侧用同一对参数。
-        from .kurobbs import _split_aspect
+        from .kurobbs import _with_level_hint
         from .games import normalize_slang
 
         query = normalize_slang(query, self.profile)
         raw_question = question
         question = normalize_slang(question, self.profile) if question else question
         # 「毕业面板」的“毕业”被黑话删掉，等级线索在这里补回。
-        if any(word in raw_question for word in ("毕业", "满级")) and any(
-            word in raw_question for word in ("面板", "属性", "等级", "数值")
-        ):
-            question = f"{question} 90级"
-        if not question:
-            query, question = _split_aspect(query)
+        question = _with_level_hint(question, raw_question)
         return await super().search(query, question)
+
+    async def _fallback_search(self, query, question):
+        from .kurobbs import _split_aspect
+
+        # 名称可能含方面词（如“索拉等级”）；两源都先搜完整名称。
+        result = await self.fallback.search(query, question)
+        if not question and result.get("status") in {"not_found", "needs_choice"}:
+            head, tail = _split_aspect(query)
+            if head and tail:
+                try:
+                    retry = await self.fallback.search(head, tail)
+                except WikiError as exc:
+                    if exc.code == "bad_input":
+                        raise
+                else:
+                    if retry.get("status") in {"ok", "section_not_found"}:
+                        return retry
+        return result

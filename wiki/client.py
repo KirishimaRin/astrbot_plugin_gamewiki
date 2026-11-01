@@ -92,8 +92,8 @@ class WikiClient:
         await self.http.aclose()
 
     def _cache_key(self, params: dict) -> str:
-        # The game code prefixes the key so two wikis never share an entry.
-        prefix = self.game if self.source == "bwiki" else f"{self.source}:{self.game}"
+        # Include custom API roots so switching instances cannot reuse old data.
+        prefix = f"v2:{self.source}:{self.game}:{self.api.rstrip('/')}\n"
         return hashlib.sha256(
             (prefix + json.dumps(params, sort_keys=True, ensure_ascii=False)).encode()
         ).hexdigest()
@@ -238,7 +238,8 @@ class WikiClient:
                     raise WikiError("too_large", "词条内容过大，请换用更具体的条目。")
                 chunks.append(chunk)
         try:
-            result = json.loads(b"".join(chunks))
+            # AKEData 表可达 32MB；解析放线程里，避免阻塞事件循环。
+            result = await asyncio.to_thread(json.loads, b"".join(chunks))
         except (ValueError, UnicodeError):
             raise WikiError(
                 "invalid_response", f"{self.source_name} 返回了非 JSON 内容。"
