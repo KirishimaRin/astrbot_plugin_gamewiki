@@ -507,3 +507,78 @@ class TestGuideSubpage(unittest.IsolatedAsyncioTestCase):
         with pytest.raises(WikiError) as exc:
             await service.read(1, "突破")
         assert exc.value.code == "invalid_response"
+
+
+class VoiceClient:
+    source = "bwiki"
+
+    def __init__(self):
+        self.requests = []
+        self.missing = False
+        self.weapon = False
+
+    async def request(self, params, ttl):
+        self.requests.append(dict(params))
+        if params["action"] == "query":
+            return {"query": {"search": [{"title": "胡桃", "pageid": 1}]}}
+        voice = params.get("page") == "胡桃/语音" or params.get("pageid") == 2
+        if voice and self.missing:
+            return {"_fetched_at": "2026-11-01"}
+        return {
+            "_fetched_at": "2026-11-01",
+            "parse": {
+                "title": "胡桃/语音" if voice else "胡桃",
+                "pageid": 2 if voice else 1,
+                "revid": 1,
+                "text": "<h2>语音</h2><p>测试语音证据。</p>"
+                if voice
+                else (
+                    "<h2>武器技能</h2><p>武器效果。</p>"
+                    if self.weapon
+                    else "<h2>命之座</h2><p>角色命之座内容。</p>"
+                ),
+            },
+        }
+
+
+class TestReadSubpage(unittest.IsolatedAsyncioTestCase):
+    async def test_followup_and_search_share_the_resolver(self):
+        client = VoiceClient()
+        service = QueryService(client, profile=PROFILES["ys"])
+        initial = await service.search("胡桃")
+        follow = await service.read(initial["page_id"], "语音", source="bwiki")
+        direct = await service.search("胡桃", "语音")
+        assert follow["title"] == direct["title"] == "胡桃/语音"
+        assert "测试语音证据" in str(follow["evidence"])
+        assert follow["source_key"] == "bwiki" and follow["resolved_from"]
+        client.requests.clear()
+        await service.read(2, "语音")
+        assert len(client.requests) == 1  # no nested /语音/语音
+
+    async def test_explicit_section_and_source_binding(self):
+        client = VoiceClient()
+        service = QueryService(client, profile=PROFILES["ys"])
+        result = await service.read(1, "语音", "命之座")
+        assert result["title"] == "胡桃"
+        assert len(client.requests) == 1
+        with pytest.raises(WikiError):
+            await service.read(1, "语音", source="prts")
+        assert len(client.requests) == 1
+
+    async def test_missing_subpage_and_non_character_read(self):
+        client = VoiceClient()
+        service = QueryService(client, profile=PROFILES["ys"])
+        client.missing = True
+        assert (await service.read(1, "语音"))["title"] == "胡桃"
+        assert len(client.requests) == 2
+        await service.clear_parse_cache()
+        client.weapon = True
+        client.requests.clear()
+        await service.read(1, "语音")
+        assert len(client.requests) == 1
+
+    async def test_read_equipment_reuses_guide_rules(self):
+        client = TestGuideSubpage.GuideClient()
+        result = await QueryService(client, profile=PROFILES["ys"]).read(1, "圣遗物")
+        assert result["title"] == "胡桃/攻略"
+        assert [e["section"] for e in result["evidence"]] == ["圣遗物"]

@@ -25,10 +25,6 @@ def test_large_transparent_portrait_is_resized_and_temporary_file_is_removed():
                 assert Path(path).is_file()
                 saved = path
             assert not Path(saved).exists()
-        with patch("wiki.images._download", AsyncMock()) as download:
-            async with prepared_image("https://example.org/image.png") as path:
-                assert path == "https://example.org/image.png"
-            download.assert_not_awaited()
 
     asyncio.run(run())
 
@@ -61,10 +57,10 @@ def test_spire_codex_webp_is_converted_and_cached(tmp_path):
                 async with prepared_image(url, cache, convert_webp=True) as path:
                     assert Path(path).is_file()
                 second.assert_not_awaited()
-            with patch("wiki.images._download", AsyncMock()) as third:
+            with patch("wiki.images._download", AsyncMock(return_value=body)) as third:
                 async with prepared_image(url) as path:
-                    assert path == url
-                third.assert_not_awaited()
+                    assert Path(path).read_bytes() == body
+                third.assert_awaited_once_with(url)
             await cache.clear()
 
     asyncio.run(run())
@@ -75,11 +71,13 @@ def test_compressed_image_cache_and_failed_send_cleanup(tmp_path):
 
     async def run():
         cache = Cache(tmp_path)
-        download = AsyncMock(return_value=b"jpeg fixture")
+        fixture = io.BytesIO()
+        Image.new("RGB", (2, 2), "white").save(fixture, format="JPEG")
+        download = AsyncMock(return_value=fixture.getvalue())
         url = ASSETS + "characterportrait/test.png"
         with patch("wiki.images._download", download):
             async with prepared_image(url, cache) as path:
-                assert Path(path).read_bytes() == b"jpeg fixture"
+                assert Path(path).is_file()
             with pytest.raises(RuntimeError):
                 async with prepared_image(url, cache) as path:
                     saved = path

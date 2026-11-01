@@ -636,6 +636,11 @@ class GameWiki(Star):
         try:
             async with self._image_slots:
                 options = {"convert_webp": True} if convert_webp else {}
+                origins = tuple(
+                    o for o in (self.spire_codex_base, self.kuro_bbs_base) if o
+                )
+                if origins:
+                    options["origins"] = origins
                 async with prepared_image(image_url, self.cache, **options) as image:
                     await event.send(event.image_result(image))
         except Exception:

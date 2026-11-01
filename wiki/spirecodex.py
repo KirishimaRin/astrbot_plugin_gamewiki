@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 import httpx
 
 from .client import WikiClient
+from .images import optional_image_url
 from .games import STS2, aspect_words, normalize_slang
 from .models import Section, WikiError
 from .selection import evidence
@@ -2048,15 +2049,13 @@ class SpireCodexService:
         return f"{self.base}/zhs/{PATHS[kind]}/{str(key).lower()}"
 
     def _image_url(self, kind, entity):
-        if kind == "card":
-            return entity.get("image_url_card") or ""
-        if kind == "character":
-            key = str(entity.get("id", "")).lower()
-            # Character payloads carry no image field; the site serves the
-            # combat pose used on character pages.
-            return f"{self.cdn}/characters/combat_{key}.webp" if key else ""
         image = entity.get("image_url") or ""
-        return self.base + image if image.startswith("/") else image
+        if kind == "card":
+            image = entity.get("image_url_card") or ""
+        elif kind == "character":
+            key = str(entity.get("id", "")).lower()
+            image = f"{self.cdn}/characters/combat_{key}.webp" if key else ""
+        return optional_image_url(image, base=self.base, origins=(self.cdn,))
 
     async def _index(self, kind, lang):
         key = (kind, lang)

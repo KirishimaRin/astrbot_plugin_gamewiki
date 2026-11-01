@@ -116,7 +116,7 @@ DETAIL = {
                                 ],
                                 "figures": [
                                     {
-                                        "url": "https://img.example/lihui.png",
+                                        "url": "https://prod-alicdn-community.kurobbs.com/lihui.png",
                                         "name": "立绘",
                                     }
                                 ],
@@ -255,7 +255,7 @@ def test_modules_map_to_shared_section_titles_and_extract_voice():
     titles = [s.title for s in sections]
     # 推荐模块的四个 tab 各自成节，复合问句才不会被武器推荐正文挤掉。
     assert titles == ["基本信息", "武器推荐", "声骸推荐", "语音"]
-    assert image == "https://img.example/lihui.png"
+    assert image == "https://prod-alicdn-community.kurobbs.com/lihui.png"
     assert "时和岁稔＞苍鳞千嶂" in sections[1].blocks[0]
     assert "毕业配装 | 浮星祛暗2+5" in sections[2].blocks[0]
     voice = sections[3]

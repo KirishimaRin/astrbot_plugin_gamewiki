@@ -1378,3 +1378,131 @@ def test_failed_cards_deliver_material_details_as_text(plugin, failure):
     assert len(event.sent) == 2
     assert "原文摘录" in event.sent[1]
     assert "劫波莲" in event.sent[1] and "168" in event.sent[1]
+
+
+def test_default_all_games_doctor_is_complete_and_local(tmp_path):
+    module, Event = _install_stubs(str(tmp_path))
+    instance = module.GameWiki(object(), {})
+    instance.context = SimpleNamespace(
+        get_current_chat_provider_id=AsyncMock(return_value="test"),
+        llm_generate=AsyncMock(side_effect=AssertionError("model must not run")),
+    )
+
+    async def run():
+        try:
+            with patch(
+                "httpx.AsyncClient.send",
+                AsyncMock(side_effect=AssertionError("doctor must not request HTTP")),
+            ):
+                event = Event("op doctor", admin=True)
+                await _collect(instance.wiki_command_op(event))
+                assert len(event.sent) == 1
+                assert set(instance.services) == set(PROFILES)
+                assert instance.sts2_chinese_sources
+                for client in instance.clients:
+                    assert f"[{client.game}/{client.source}]" in event.sent[0]
+                    assert set(client.health()) == {
+                        "blocked_seconds",
+                        "pending",
+                        "closed",
+                    }
+                    assert isinstance(client.stats()["errors"], dict)
+                instance.context.llm_generate.assert_not_awaited()
+        finally:
+            await instance.terminate()
+        assert all(client.health()["closed"] for client in instance.clients)
+
+    asyncio.run(run())
+
+
+def test_voice_followup_candidate_confirmation_and_model_tool_read(plugin):
+    from test_query import VoiceClient
+
+    instance, Event, module = plugin
+    client = VoiceClient()
+    service = module.QueryService(client, profile=module.PROFILES["ys"])
+    instance.services["ys"] = service
+    instance.image_reply = False
+    instance.context = SimpleNamespace(
+        get_current_chat_provider_id=AsyncMock(return_value="test"),
+        llm_generate=AsyncMock(side_effect=RuntimeError("use local evidence")),
+    )
+
+    async def run():
+        first = Event("ys 胡桃")
+        await _collect(instance.wiki_command_ys(first))
+        follow = Event("语音")
+        await instance.wiki_followup(follow)
+        assert follow.stopped and "测试语音证据" in str(follow.sent)
+        assert "胡桃/语音" in str(follow.sent)
+
+        # The original aspect question survives disambiguation and selection.
+        request = client.request
+
+        async def fuzzy(params, ttl):
+            if params["action"] == "query":
+                return {
+                    "query": {
+                        "search": [
+                            {"title": "胡桃", "pageid": 1},
+                            {"title": "桃子", "pageid": 3},
+                        ]
+                    }
+                }
+            return await request(params, ttl)
+
+        client.request = fuzzy
+        choice_event = Event("ys 桃桃 语音", origin="other:GroupMessage:2")
+        await _collect(instance.wiki_command_ys(choice_event))
+        assert "1." in str(choice_event.sent)
+        selected = Event("1", origin=choice_event.unified_msg_origin)
+        await instance.wiki_followup(selected)
+        assert "测试语音证据" in str(selected.sent)
+
+        tool = json.loads(
+            await instance.wiki_read(Event(), 1, "", "语音", "ys", "bwiki")
+        )
+        assert tool["title"] == "胡桃/语音"
+        assert "测试语音证据" in str(tool["evidence"])
+
+    asyncio.run(run())
+
+
+def test_entry_image_owns_downloaded_file_until_send_finishes(plugin, tmp_path):
+    import io
+    from PIL import Image
+
+    instance, Event, module = plugin
+    source = io.BytesIO()
+    Image.new("RGB", (2, 2), "white").save(source, format="PNG")
+    body = source.getvalue()
+    image_module = sys.modules[module.prepared_image.__module__]
+    url = "https://cdn.spire-codex.com/owned.png"
+
+    async def run():
+        event = Event()
+        owned = tmp_path / "upstream-owned.png"
+        owned.write_bytes(body)
+        event.image_result = lambda value: value
+        await instance._send_entry_image(event, str(owned))
+        assert not event.sent and not instance._recent_images
+        paths = []
+
+        async def send(path):
+            assert path != str(owned) and path != url
+            assert Path(path).read_bytes() == body
+            await asyncio.sleep(0)
+            assert Path(path).exists()
+            paths.append(path)
+
+        event.send = send
+        with patch.object(
+            image_module, "_download", AsyncMock(return_value=body)
+        ) as download:
+            await instance._send_entry_image(event, url)
+            assert len(paths) == 1 and not Path(paths[0]).exists()
+            await instance._send_entry_image(event, url)
+            download.assert_awaited_once_with(url)
+            assert len(paths) == 1
+
+    asyncio.run(run())

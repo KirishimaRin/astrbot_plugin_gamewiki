@@ -8,6 +8,7 @@ parsed and cached; a missing or changed page falls back to Spire Codex.
 
 import asyncio
 import hashlib
+import math
 import re
 import time
 from urllib.parse import quote, unquote
@@ -157,6 +158,9 @@ def _excerpt(text) -> str:
 
 
 class ChineseGuideService:
+    game = "sts2"
+    source = "chineseguide"
+
     def __init__(self, cache: Cache, *, timeout=15, transport=None):
         self.cache = cache
         self.timeout = timeout
@@ -168,10 +172,34 @@ class ChineseGuideService:
             },
             transport=transport,
         )
+        self._counters = {"upstream_requests": 0, "cache_hits": 0, "coalesced": 0}
+        self._errors = {}
+        self._pending_requests = 0
         self._pace = asyncio.Lock()
         self._next_request = 0.0
         self._pace_seconds = 0.4
         self._blocked: dict[str, float] = {}
+
+    def health(self):
+        return {
+            "blocked_seconds": max(
+                (
+                    max(0, math.ceil(until - time.monotonic()))
+                    for until in self._blocked.values()
+                ),
+                default=0,
+            ),
+            "pending": self._pending_requests,
+            "closed": self.http.is_closed,
+        }
+
+    def stats(self):
+        return {
+            "game": self.game,
+            "source": self.source,
+            **self._counters,
+            "errors": dict(self._errors),
+        }
 
     async def close(self):
         await self.http.aclose()
@@ -191,9 +219,21 @@ class ChineseGuideService:
             return 30.0
 
     async def _get(self, url: str, ttl: float, parser):
+        self._pending_requests += 1
+        try:
+            return await self._get_inner(url, ttl, parser)
+        except Exception as exc:
+            code = type(exc).__name__
+            self._errors[code] = self._errors.get(code, 0) + 1
+            raise
+        finally:
+            self._pending_requests -= 1
+
+    async def _get_inner(self, url: str, ttl: float, parser):
         key = "chineseguide:" + hashlib.sha256(url.encode()).hexdigest()
         saved = await self.cache.get(key)
         if isinstance(saved, dict) and "data" in saved:
+            self._counters["cache_hits"] += 1
             return saved["data"]
         host = httpx.URL(url).host
         if self._blocked.get(host, 0.0) > time.monotonic():
@@ -201,6 +241,7 @@ class ChineseGuideService:
         for attempt in range(3):
             await self._wait()
             try:
+                self._counters["upstream_requests"] += 1
                 async with self.http.stream("GET", url) as response:
                     response.raise_for_status()
                     chunks, size = [], 0

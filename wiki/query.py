@@ -246,41 +246,7 @@ class QueryService:
             "candidates": candidates,
         }
         focus = "" if question in {"", query, normalized} else question
-        result.update(await self._read(hits[0]["pageid"], focus, ""))
-        # BWIKI 原神/星铁把配装推荐放在角色「/攻略」子页，主页只有跳转
-        # （原神）或干脆没有（星铁）；两游戏的语音正文在「/语音」子页。
-        # 问句命中对应方面词且当前页是角色页时优先读子页；子页不存在就
-        # 保留主页结果。鸣潮标题自带命名空间前缀，先剥掉再判断子页。
-        sub_rows = []
-        if self.profile.guide_suffix:
-            sub_rows.append((self.profile.guide_aspects, self.profile.guide_suffix))
-        sub_rows.extend(self.profile.sub_pages)
-        raw_title = hits[0]["title"]
-        if self.profile.title_namespaces:
-            ns, sep, leaf = raw_title.partition("/")
-            sub_base = (
-                leaf if sep and ns in self.profile.title_namespaces else raw_title
-            )
-        else:
-            sub_base = raw_title
-        for aspects, suffix in sub_rows:
-            if not (focus and "/" not in sub_base):
-                continue
-            if not any(word in focus for word in aspects):
-                continue
-            if not any(
-                marker in result.get("available_sections", [])
-                for marker in CHARACTER_SECTIONS
-            ):
-                continue
-            try:
-                sub = await self._read(raw_title + suffix, focus, "")
-            except WikiError:
-                sub = None
-            if sub and sub.get("status") == "ok":
-                result["resolved_from"] = result["url"]
-                result.update(sub)
-                break
+        result.update(await self._read_with_subpage(hits[0]["pageid"], focus, ""))
         # Same-name item pages may point to a book chapter in their hatnote.
         # Follow only that exact chapter, once, for reading/content requests.
         wants_content = (
@@ -323,8 +289,50 @@ class QueryService:
         if len(question) > 300 or len(section) > 100:
             raise WikiError("bad_input", "问题或分节名称过长。")
         return await asyncio.wait_for(
-            self._read(page_id, question, section), self.timeout
+            self._read_with_subpage(page_id, question, section), self.timeout
         )
+
+    async def _read_with_subpage(self, page_id, question, section):
+        result = await self._read(page_id, question, section)
+        # An explicit section always refers to the requested page.
+        if section:
+            return result
+        # BWIKI 原神/星铁把配装推荐放在角色「/攻略」子页，主页只有跳转
+        # （原神）或干脆没有（星铁）；两游戏的语音正文在「/语音」子页。
+        # 问句命中对应方面词且当前页是角色页时优先读子页；子页不存在就
+        # 保留主页结果。鸣潮标题自带命名空间前缀，先剥掉再判断子页。
+        sub_rows = []
+        if self.profile.guide_suffix:
+            sub_rows.append((self.profile.guide_aspects, self.profile.guide_suffix))
+        sub_rows.extend(self.profile.sub_pages)
+        raw_title = result["title"]
+        if self.profile.title_namespaces:
+            ns, sep, leaf = raw_title.partition("/")
+            sub_base = (
+                leaf if sep and ns in self.profile.title_namespaces else raw_title
+            )
+        else:
+            sub_base = raw_title
+        for aspects, suffix in sub_rows:
+            if not (question and "/" not in sub_base):
+                continue
+            if not any(word in question for word in aspects):
+                continue
+            if not any(
+                marker in result.get("available_sections", [])
+                for marker in CHARACTER_SECTIONS
+            ):
+                continue
+            try:
+                sub = await self._read(raw_title + suffix, question, "")
+            except WikiError:
+                sub = None
+            if sub and sub.get("status") == "ok":
+                result["resolved_from"] = result["url"]
+                result.update(sub)
+                break
+        result["source_urls"] = source_links(result)
+        return result
 
     async def _read(self, page_id, question, section):
         data = await self.client.request(

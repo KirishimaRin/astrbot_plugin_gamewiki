@@ -16,19 +16,28 @@ Wire facts (verified 2026-10-30 against the live site, guest access):
 """
 
 import asyncio
+import copy
+import hashlib
 import json
 import re
 import time
+import threading
+from collections import OrderedDict
 from datetime import datetime, timezone
 
 import httpx
 from bs4 import BeautifulSoup
 
 from .client import WikiClient
+from .images import optional_image_url
 from .games import WW, aspect_words, normalize_slang
 from .models import Section, WikiError
 from .selection import evidence
 
+# Admission is global across services. Timed-out callers do not release it:
+# only completion of the actual worker does. No executor backlog is allowed.
+_PARSE_CAPACITY = threading.BoundedSemaphore(2)
+PARSE_CACHE_BYTES = 16 << 20
 BASE = "https://api.kurobbs.com"
 # 库街区首页的鸣潮词条路由是 /mc/item/<雪花ID>。
 ITEM_URL = "https://wiki.kurobbs.com/mc/item/{id}"
@@ -466,18 +475,18 @@ def _role_block(module):
     return ""
 
 
-def _figure_url(module):
+def _figure_url(module, base="https://wiki.kurobbs.com"):
     for component in module.get("components") or []:
         role = component.get("role")
         if isinstance(role, dict):
             for figure in role.get("figures") or []:
                 url = figure.get("verticalFigureUrl") or figure.get("url")
                 if url:
-                    return url
+                    return optional_image_url(url, base=base)
     return ""
 
 
-def modules_to_sections(modules):
+def modules_to_sections(modules, *, image_base="https://wiki.kurobbs.com"):
     """Map wiki modules to shared section titles; return (sections, image).
 
     角色词条的分节按「玩家会问什么」切，而不是按模块整块给：
@@ -488,7 +497,7 @@ def modules_to_sections(modules):
     sections, image = [], ""
     for module in modules or []:
         raw_title = str(module.get("title") or "").strip() or "基本信息"
-        image = image or _figure_url(module)
+        image = image or _figure_url(module, image_base)
         if raw_title == "基础资料":
             role = _role_block(module)
             if role:
@@ -563,7 +572,17 @@ class KuroBbsService:
         self.search_ttl, self.page_ttl = search_ttl, page_ttl
         self.max_chars, self.timeout = max_chars, timeout
         # 雪花ID 直接作 page_id（int64 内），无需编码方案。
-        self._counters = {"upstream_requests": 0, "cache_hits": 0}
+        self._counters = {
+            "upstream_requests": 0,
+            "cache_hits": 0,
+            "pages_parsed": 0,
+            "parse_cache_hits": 0,
+        }
+        self._parsed = OrderedDict()
+        self._parse_bytes = 0
+        self._cache_lock = threading.Lock()
+        self._parse_generation = 0
+        self._workers = set()
 
     def stats(self):
         data = dict(self._counters)
@@ -577,7 +596,77 @@ class KuroBbsService:
         await self.client.close()
 
     async def clear_parse_cache(self):
-        return 0
+        with self._cache_lock:
+            count = len(self._parsed)
+            self._parsed.clear()
+            self._parse_bytes = 0
+            self._parse_generation += 1
+        return count
+
+    async def _render_off_loop(self, data, entry_id, question, section):
+        if not _PARSE_CAPACITY.acquire(blocking=False):
+            raise WikiError("busy", "库街区正文解析繁忙，请稍后重试。")
+
+        with self._cache_lock:
+            generation = self._parse_generation
+
+        def work():
+            try:
+                return self._render_detail(
+                    data, entry_id, question, section, generation
+                )
+            finally:
+                _PARSE_CAPACITY.release()
+
+        task = asyncio.create_task(asyncio.to_thread(work))
+        self._workers.add(task)
+        task.add_done_callback(self._workers.discard)
+        # Retrieve failures even if the waiting request has already timed out.
+        task.add_done_callback(
+            lambda done: done.exception() if not done.cancelled() else None
+        )
+        return await asyncio.shield(task)
+
+    def _sections(self, content, generation):
+        # Serialization/hash and cache copies also run in the bounded worker.
+        raw = json.dumps(content, ensure_ascii=False).encode()
+        if len(raw) > 8 << 20:
+            raise ValueError("Wiki content exceeds parse limit")
+        key = hashlib.sha256(raw).digest()
+        now = time.monotonic()
+        with self._cache_lock:
+            for old, (expires, size, _) in list(self._parsed.items()):
+                if expires <= now:
+                    self._parse_bytes -= size
+                    del self._parsed[old]
+            cached = self._parsed.get(key)
+            if cached:
+                self._parsed.move_to_end(key)
+                self._counters["parse_cache_hits"] += 1
+        if cached:
+            return copy.deepcopy(cached[2])
+        parsed = modules_to_sections(
+            content.get("modules"), image_base=getattr(self.client, "api", BASE)
+        )
+        # Include parsed text in the retained-size budget; bounded input alone
+        # would underestimate the cache after HTML expansion.
+        size = len(raw) + sum(len(b.encode()) for sec in parsed[0] for b in sec.blocks)
+        with self._cache_lock:
+            self._counters["pages_parsed"] += 1
+            if (
+                generation == self._parse_generation
+                and self.page_ttl > 0
+                and size <= PARSE_CACHE_BYTES
+            ):
+                previous = self._parsed.pop(key, None)
+                if previous:
+                    self._parse_bytes -= previous[1]
+                self._parsed[key] = (now + self.page_ttl, size, parsed)
+                self._parse_bytes += size
+                while len(self._parsed) > 8 or self._parse_bytes > PARSE_CACHE_BYTES:
+                    _, (_, removed_size, _) = self._parsed.popitem(last=False)
+                    self._parse_bytes -= removed_size
+        return copy.deepcopy(parsed)
 
     @staticmethod
     def _validate(text, length=200):
@@ -1077,8 +1166,11 @@ class KuroBbsService:
         data = await self.client.get(
             DETAIL, {"data": {"id": str(entry_id)}}, self.page_ttl
         )
+        return await self._render_off_loop(data, entry_id, question, section)
+
+    def _render_detail(self, data, entry_id, question, section, generation):
         content = data.get("content") or {}
-        sections, image = modules_to_sections(content.get("modules"))
+        sections, image = self._sections(content, generation)
         title = str(content.get("title") or data.get("name") or "未知条目").strip()
         url = self._url(entry_id)
         _prefer_level_block(sections, question)
